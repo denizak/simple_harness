@@ -1,5 +1,8 @@
 import Foundation
 
+// Version reported by --version; bump when the harness changes shape.
+let harnessVersion = "0.2.0"
+
 // ---------------------------------------------------------------------------
 // main.swift — the REPL (the skin around the loop).
 //
@@ -50,6 +53,10 @@ struct HarnessMain {
     static func main() async {
         let arguments = CommandLine.arguments
 
+        if arguments.contains("--version") || arguments.contains("-V") {
+            print("simple_harness \(harnessVersion)")
+            return
+        }
         if arguments.contains("--selftest") {
             await SelfTest.run()
             return
@@ -63,6 +70,7 @@ struct HarnessMain {
                   --api-key KEY     API key override
                   --once TASK       run a single task non-interactively, then exit
                   --selftest        exercise the tool layer without any API call
+                  --version         print the version and exit
             """)
             return
         }

@@ -62,6 +62,23 @@ swift build
 
 Slash commands inside the REPL: `/help /reset /model /tools /save /load /retry /exit`.
 
+## Install
+
+SwiftPM has no `swift install` command — an executable is just a file under
+`.build/<config>/`. Installing means: build in release mode, copy the binary
+onto your `PATH`. `make` wraps that:
+
+```bash
+make install          # optimized build → ~/.local/bin/harness
+harness --version     # simple_harness 0.2.0
+make uninstall
+make test             # tool-layer selftest (debug build, no API calls)
+```
+
+`~/.local/bin` must exist on your `PATH`; elsewhere:
+`sudo make install PREFIX=/usr/local/bin`. The Makefile comments explain each
+target — read it, it's 40 lines.
+
 ## Providers
 
 All providers speak the OpenAI Chat Completions dialect — one client covers all.
