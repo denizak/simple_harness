@@ -38,6 +38,7 @@ func helpText() {
     print("""
     /reset            start a fresh conversation (keeps the session file)
     /model [id]       show or switch the model (e.g. /model gpt-4o-mini)
+    /models           list models offered by the current provider
     /tools            list available tools
     /save [file]      save the session (default .harness/session.json)
     /load [file]      load a session
@@ -57,6 +58,10 @@ struct HarnessMain {
             print("simple_harness \(harnessVersion)")
             return
         }
+        if arguments.contains("--e2e") {
+            await E2ETest.run()
+            return
+        }
         if arguments.contains("--selftest") {
             await SelfTest.run()
             return
@@ -70,6 +75,7 @@ struct HarnessMain {
                   --api-key KEY     API key override
                   --once TASK       run a single task non-interactively, then exit
                   --selftest        exercise the tool layer without any API call
+                  --e2e             stub-model loop tests + a live round-trip
                   --version         print the version and exit
             """)
             return
@@ -158,6 +164,15 @@ struct HarnessMain {
             }
         case "/tools":
             for tool in Tools.all { print(AgentUI.dim("  \(tool.name) — \(tool.description)")) }
+        case "/models":
+            // Lists what the CURRENT provider offers (GET {baseURL}/models) —
+            // with Ollama Cloud that's the whole cloud catalog.
+            do {
+                let models = try await OpenAICompatClient(config: agent.config).listModels()
+                print(AgentUI.dim(models.joined(separator: "\n")))
+            } catch {
+                print(AgentUI.errorText("error: \(error)"))
+            }
         case "/save":
             do {
                 let url = argument.isEmpty ? nil : URL(fileURLWithPath: argument)

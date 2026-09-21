@@ -86,27 +86,52 @@ All providers speak the OpenAI Chat Completions dialect — one client covers al
 | Provider | How to enable | Default model |
 |---|---|---|
 | `ollama` (default) | local endpoint `http://127.0.0.1:11434/v1` | `glm-5.3-flash:cloud` |
-| `openai` (ChatGPT) | `export OPENAI_API_KEY=sk-...` | `gpt-4o-mini` |
-| `zai` (Z.ai / Zhipu GLM) | `export ZAI_API_KEY=...` | `glm-4.6` |
+| `ollama-cloud` | `export OLLAMA_API_KEY=…` ([get a key](https://ollama.com/settings/keys)) | `kimi-k2.7-code` |
+| `openai` (ChatGPT) | `export OPENAI_API_KEY=sk-…` | `gpt-4o-mini` |
+| `zai` (Z.ai / Zhipu GLM) | `export ZAI_API_KEY=…` | `glm-4.6` |
 
-Autodetect: if exactly one of the known keys is set, that provider is used
-(`ZAI_API_KEY` wins over `OPENAI_API_KEY`; set `--provider` to be explicit).
+Autodetect: the first provider with a key in the environment wins, in the
+order **ollama-cloud → zai → openai** (set `--provider` to be explicit).
 Every value is overridable:
 
 ```bash
 export OPENAI_API_KEY=sk-...
 ./.build/debug/harness --provider openai --model gpt-4o
-export ZAI_API_KEY=...
-./.build/debug/harness --provider zai --model glm-4.6
+export OLLAMA_API_KEY=...
+./.build/debug/harness --provider ollama-cloud --model glm-5.3
 ./.build/debug/harness --base-url https://api.z.ai/api/coding/paas/v4 --api-key KEY --model glm-4.6
 ```
 
 Environment overrides: `HARNESS_BASE_URL`, `HARNESS_API_KEY`, `HARNESS_MODEL`,
-`HARNESS_PROVIDER`. If pi is installed, its `~/.pi/agent/models.json` provider
-is borrowed as a fallback — same trick pi itself uses for provider config.
+`HARNESS_PROVIDER`, `HARNESS_COMPACT_BYTES`, `HARNESS_COMPACT_KEEP_TAIL`.
+If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
+fallback — same trick pi itself uses for provider config. Inside the REPL,
+`/models` lists what the current provider offers.
+
+Ollama Cloud notes ([docs](https://docs.ollama.com/cloud)): model ids are the
+raw tags from `https://ollama.com/api/tags` (e.g. `kimi-k2.7-code`); the
+`:cloud` suffix is only for a signed-in local server. `tool_choice` is not
+supported by the cloud API — the harness never sends it anyway.
 
 Provider quirks live in one place (`LLMClient.swift`): e.g. newer OpenAI models
 require `max_completion_tokens` instead of `max_tokens`.
+
+## Testing
+
+Two flags, two layers — and they fail for different reasons:
+
+```bash
+harness --selftest    # tool layer + pure loop math (no API call)
+                      # tools, compaction boundary rules, provider resolution
+harness --e2e         # the LOOP with a scripted STUB MODEL (offline, ms-fast)
+                      #   …plus one LIVE round-trip against the provider
+```
+
+The e2e stub is the key idea: a scripted `ChatModel` drives the real agent
+with real tools in a temp directory, forcing compaction mid-task. It proves
+tool_calls parse, tools execute, results feed back, and the loop terminates —
+the 90% of a harness that never needs a network. The live leg then answers
+the only question the stub can't: does the request satisfy the real server?
 
 ## Design notes (what pi does, and why)
 

@@ -155,6 +155,22 @@ enum SelfTest {
               !Compaction.isCleanBoundary(history[3]) && !Compaction.isCleanBoundary(history[7]), "")  // pi-lens-ignore: SourceKit:unknown
         check("compaction boundary accepts assistant tool_calls", Compaction.isCleanBoundary(history[6]), "")
 
+        // ---- config resolution: provider autodetect (pure, no API) ---------
+        // Env is injected, so this never touches real secrets.
+        let cloud = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "stub-key"])
+        check("ollama-cloud autodetect (OLLAMA_API_KEY)",
+              cloud.provider == "ollama-cloud" && cloud.baseURL == "https://ollama.com/v1"
+                  && cloud.model == "kimi-k2.7-code",
+              "provider=\(cloud.provider) model=\(cloud.model)")
+        let forced = Config.resolve(arguments: ["--provider", "openai"], env: ["OLLAMA_API_KEY": "a"])
+        check("--provider overrides autodetect",
+              forced.provider == "openai" && forced.baseURL == "https://api.openai.com/v1",
+              "provider=\(forced.provider)")
+        let noKeys = Config.resolve(arguments: [], env: [:])
+        check("no keys → falls back to default provider",
+              noKeys.provider != "ollama-cloud" && noKeys.provider != "zai" && noKeys.provider != "openai",
+              "provider=\(noKeys.provider)")
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }

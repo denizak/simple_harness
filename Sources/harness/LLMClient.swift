@@ -128,6 +128,28 @@ struct OpenAICompatClient: ChatModel {
         )
     }
 
+    /// GET {baseURL}/models — the OpenAI-compatible model listing. Works on
+    /// Ollama Cloud (lists cloud models), and on local servers that implement
+    /// the endpoint. Used by the /models REPL command.
+    func listModels() async throws -> [String] {
+        var request = URLRequest(url: URL(string: config.baseURL + "/models")!)
+        request.timeoutInterval = 60
+        if config.apiKey != "none" {
+            request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw LLMError(status: status, body: String(data: data, encoding: .utf8) ?? "<binary>")
+        }
+        guard let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
+              let entries = root.objectValue?["data"]?.arrayValue else {
+            throw LLMError(status: status, body: "Unexpected /models response shape")
+        }
+        return entries.compactMap { $0.objectValue?["id"]?.stringValue }.sorted()
+    }
+
     private func encode(_ message: Message) -> String {
         (try? JSONEncoder().encode(message)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }

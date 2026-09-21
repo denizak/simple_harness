@@ -62,6 +62,17 @@ struct Config: Sendable {
             envKeys: ["ZAI_API_KEY", "Z_AI_API_KEY", "ZHIPU_API_KEY"],
             defaultModel: "glm-4.6"
         ),
+        // Ollama Cloud: same OpenAI-compatible API as the local server, but
+        // models run in Ollama's datacenter. Model ids are the raw tags from
+        // https://ollama.com/api/tags (e.g. "kimi-k2.7-code") — the ":cloud"
+        // suffix is only for a signed-in LOCAL server proxying to the cloud.
+        // Docs: https://docs.ollama.com/cloud
+        "ollama-cloud": ProviderProfile(
+            name: "ollama-cloud",
+            baseURL: "https://ollama.com/v1",
+            envKeys: ["OLLAMA_API_KEY"],
+            defaultModel: "kimi-k2.7-code"
+        ),
         "ollama": ProviderProfile(
             name: "ollama",
             baseURL: "http://127.0.0.1:11434/v1",
@@ -70,8 +81,17 @@ struct Config: Sendable {
         ),
     ]
 
+    /// Provider ids checked, in order, when no --provider flag is given:
+    /// the first one with an API key in the environment wins.
+    static let autodetectOrder = ["ollama-cloud", "zai", "openai"]
+
     static func resolve(arguments: [String]) -> Config {
-        let env = ProcessInfo.processInfo.environment
+        resolve(arguments: arguments, env: ProcessInfo.processInfo.environment)
+    }
+
+    /// Injectable-environment variant so the selftest can verify provider
+    /// selection without touching real secrets.
+    static func resolve(arguments: [String], env: [String: String]) -> Config {
         var config = Config(
             provider: "ollama",
             baseURL: "http://127.0.0.1:11434/v1",
@@ -85,8 +105,8 @@ struct Config: Sendable {
         }
 
         // 3. Provider catalog. --provider X wins; otherwise the first
-        // provider with an API key in the environment wins (zai > openai here
-        // only to make the order deterministic — set --provider to override).
+        // provider in autodetectOrder with an API key in the environment wins
+        // (set --provider to override the deterministic default order).
         let requested = flagValue("--provider", in: arguments)
         if let name = requested ?? env["HARNESS_PROVIDER"], let profile = catalog[name.lowercased()] {
             config = Config(
@@ -96,10 +116,11 @@ struct Config: Sendable {
                 model: profile.defaultModel
             )
         } else if requested == nil && env["HARNESS_PROVIDER"] == nil {
-            if let zai = catalog["zai"], zai.key(in: env) != nil {
-                config = apply(zai, env)
-            } else if let openai = catalog["openai"], openai.key(in: env) != nil {
-                config = apply(openai, env)
+            for name in autodetectOrder {
+                if let profile = catalog[name], profile.key(in: env) != nil {
+                    config = apply(profile, env)
+                    break
+                }
             }
         }
 

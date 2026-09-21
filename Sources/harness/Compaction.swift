@@ -94,6 +94,8 @@ enum Compaction {
     /// does, summarize everything before the kept tail and splice the history
     /// into [system, summary, tail…]. Runs before every model call; for
     /// short sessions it is a cheap size check.
+    /// Upper bound on the summary message we accept (~200 words + prefix).
+    private static let maxSummaryBytes = 1_300
     static func compactIfNeeded(
         _ messages: inout [Message],
         config: Config,
@@ -105,6 +107,13 @@ enum Compaction {
               start > 1 else { return }
 
         let older = Array(messages[1..<start])
+        // Pre-flight: is the older portion substantial enough to be worth a
+        // summarizer call at all? A tiny older block can never clear the
+        // gain bar below (the summary message costs ~100 bytes plus text) —
+        // the e2e test caught the first draft wasting a call on exactly that.
+        let minGain = max(512, total / 4)
+        guard size(of: older) > minGain + maxSummaryBytes else { return }
+
         let turn = try? await model.complete(
             [.system(summarizerSystem), .user(transcript(older))],
             tools: []  // the summarizer must not run tools
@@ -116,9 +125,19 @@ enum Compaction {
         let summaryMessage = Message.user(
             "[Auto-compacted] Summary of the earlier conversation:\n\(summary)"
         )
-        messages = [messages[0], summaryMessage] + Array(messages[start...])
+        // A compaction that doesn't meaningfully shrink the transcript is not
+        // worth its summarizer call — and can even GROW the history (the
+        // summary text itself becomes part of the transcript; the e2e test
+        // caught exactly that: 5199 → 5250 bytes for one summarized message).
+        // Only splice when the gain clears this bar; otherwise wait for more
+        // history to accumulate.
+        let candidate = [messages[0], summaryMessage] + Array(messages[start...])
+        let newSize = size(of: candidate)
+        guard newSize < total - minGain else { return }
+
+        messages = candidate
         print(AgentUI.dim(
-            "🧹 compacted \(older.count) older messages (\(total) → \(size(of: messages)) bytes)"
+            "🧹 compacted \(older.count) older messages (\(total) → \(newSize) bytes)"
         ))
     }
 }
