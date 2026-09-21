@@ -1,0 +1,7 @@
+{
+  "$schema": "https://pi-lens.dev/schema/project-config.json",
+  "ignore": [
+    ".build/**",
+    ".harness/**"
+  ]
+}
