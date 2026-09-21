@@ -95,6 +95,63 @@ enum SelfTest {
         let parsed = JSONValue.parse(#"{"a": [1, "two", true], "b": null}"#)
         check("JSONValue.parse", parsed?.objectValue?["a"]?.arrayValue?.count == 3, "")
 
+        // ---- grep: regex search across a small tree -------------------------
+        // The tree mirrors real projects: nested dirs, mixed case, and a
+        // subdirectory to prove the walk recurses.
+        let grepDir = NSTemporaryDirectory() + "harness-grep-\(UUID().uuidString)/"
+        try? FileManager.default.createDirectory(atPath: grepDir + "sub", withIntermediateDirectories: true)
+        try? "needle here\nother line\n".write(toFile: grepDir + "a.txt", atomically: true, encoding: .utf8)
+        try? "NEEDLE upper\n".write(toFile: grepDir + "sub/b.md", atomically: true, encoding: .utf8)
+
+        output = await runTool {
+            try await Tools.grep.run(
+                ["pattern": .string("needle"), "path": .string(grepDir)] as [String: JSONValue], "."
+            )
+        }
+        check("grep default (case-sensitive) misses NEEDLE", output.contains("a.txt:1") && !output.contains("b.md"), output)
+
+        output = await runTool {
+            try await Tools.grep.run(
+                ["pattern": .string("needle"),
+                 "path": .string(grepDir),
+                 "ignore_case": .bool(true)] as [String: JSONValue], "."
+            )
+        }
+        check("grep ignore_case hits both files", output.contains("NEEDLE upper") && output.contains("a.txt:1"), output)
+
+        output = await runTool {
+            try await Tools.grep.run(
+                ["pattern": .string("no-such-token"), "path": .string(grepDir)] as [String: JSONValue], "."
+            )
+        }
+        check("grep reports no matches", output.contains("no matches"), output)
+        try? FileManager.default.removeItem(atPath: grepDir)
+
+        // ---- compaction boundary math (pure functions, no API call) ---------
+        // The tail must start at a plain user message so no tool_call loses
+        // its tool result. History shape (indexes):
+        //   0 system | 1 user | 2 assistant→tools | 3 tool | 4 assistant
+        //   | 5 user | 6 assistant→tools | 7 tool | 8 assistant
+        let fixtureCall = ToolCall(id: "call_1", type: "function", function: .init(name: "bash", arguments: "{}"))
+        let assistantAsking = Message(role: "assistant", content: nil, toolCalls: [fixtureCall], toolCallId: nil, name: nil)
+        let history: [Message] = [
+            .system("sys"),
+            .user("first task"),
+            assistantAsking,
+            .tool(result: "result text", for: fixtureCall),
+            Message(role: "assistant", content: "done", toolCalls: nil, toolCallId: nil, name: nil),
+            .user("second task"),
+            assistantAsking,
+            .tool(result: "second result", for: fixtureCall),
+            Message(role: "assistant", content: "done again", toolCalls: nil, toolCallId: nil, name: nil),
+        ]
+        let start = Compaction.tailStart(in: history, keepTail: 3)
+        let startLabel = start.map(String.init) ?? "nil"
+        check("compaction tail starts mid-exchange (not on a tool result)", start == 6, "start=\(startLabel)")
+        check("compaction boundary rejects tool results",
+              !Compaction.isCleanBoundary(history[3]) && !Compaction.isCleanBoundary(history[7]), "")
+        check("compaction boundary accepts assistant tool_calls", Compaction.isCleanBoundary(history[6]), "")
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }

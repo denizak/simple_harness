@@ -40,8 +40,9 @@ That boundary is what makes the loop safe and debuggable.
 | `JSONValue.swift` | Dynamic JSON type for model-generated tool arguments | Why you need "any JSON" in Swift |
 | `LLMClient.swift` | `ChatModel` protocol + OpenAI-compatible HTTP client | One protocol, any provider |
 | `Config.swift` | Provider catalog + resolution order | How harnesses think about "providers" |
-| `Tools.swift` | `bash`, `read_file`, `write_file`, `edit_file` | Tools are (name, schema, executor) |
+| `Tools.swift` | `bash`, `grep`, `read_file`, `write_file`, `edit_file` | Tools are (name, schema, executor) |
 | `Agent.swift` | **THE LOOP** | Start here. Comments explain every step |
+| `Compaction.swift` | Summarizes old turns when the transcript grows too big | The only safe cut points are non-tool-result messages |
 | `Session.swift` | JSON session persistence (autosaved per task) | Session == replayable API request |
 | `Selftest.swift` | `--selftest`: tool layer without any API call | Test what's testable |
 | `Harness.swift` | REPL: slash commands, `--once`, banner | The skin around the loop |
@@ -98,6 +99,15 @@ require `max_completion_tokens` instead of `max_tokens`.
 - **Turn cap + output truncation.** `maxTurns` (25) stops runaway loops;
   tool output is truncated (20k chars) before it enters context — a 50 MB build
   log is not context, it's a bill.
+- **Context compaction.** Before every model call the transcript's byte
+  estimate is checked (`compactAboveBytes`, default 100k ≈ 25k tokens). Past
+  the threshold, the older portion is summarized by the model into one
+  message and the recent tail is kept verbatim. The tail may start anywhere
+  EXCEPT on a tool result — an orphaned result (whose `tool_call` was
+  summarized away) is rejected by the API. Compaction is best-effort: a
+  failed summary never breaks the task. Try it:
+  `HARNESS_COMPACT_BYTES=1600 HARNESS_COMPACT_KEEP_TAIL=4 harness --once "…"`
+  → look for the `🧹 compacted …` line.
 - **Watchdog on `bash`.** Commands run detached; after the deadline the child
   is `terminate()`d, then SIGKILL. Reading pipes to EOF *before*
   `waitUntilExit` avoids the classic pipe-buffer deadlock.
@@ -109,11 +119,9 @@ require `max_completion_tokens` instead of `max_tokens`.
 1. **Streaming (SSE)** — parse `data: {...}` chunks from
    `/chat/completions` with `URLSession.bytes(for:)`; print tokens as they
    arrive.
-2. **Context compaction** — when history grows past N tokens, summarize old
-   turns with the model and keep the tail (pi's `compaction.md`).
-3. **Tool-approval gate** — confirm before `bash` runs; per-tool allowlists.
-4. **JSONL sessions** — append one line per message instead of rewriting a
+2. **Tool-approval gate** — confirm before `bash` runs; per-tool allowlists.
+3. **JSONL sessions** — append one line per message instead of rewriting a
    JSON blob (pi's `session-format.md`); enables crash recovery.
-5. **A second client** — implement `ChatModel` for Anthropic's native
+4. **A second client** — implement `ChatModel` for Anthropic's native
    Messages API and compare the tool-use protocols.
-6. **Sub-agents** — expose "spawn a fresh harness" as a tool.
+5. **Sub-agents** — expose "spawn a fresh harness" as a tool.

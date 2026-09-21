@@ -2,6 +2,7 @@ import Foundation
 
 // ---------------------------------------------------------------------------
 // Agent.swift — THE LOOP. This is the part that makes it an "agent".
+// (Compaction of the history is Compaction.swift; this file only triggers it.)
 //
 // Every agent harness (pi, Claude Code, aider, ...) is some variation of:
 //
@@ -38,6 +39,12 @@ struct Agent {
         messages.append(.user(input))
 
         for turnIndex in 1...config.maxTurns {
+            // ---- 0. Keep the context bounded --------------------------------
+            // Cheap size check before every model call; only when the history
+            // exceeds config.compactAboveBytes does it summarize older turns
+            // (see Compaction.swift). No-op for short sessions.
+            await Compaction.compactIfNeeded(&messages, config: config, model: model)
+
             // ---- 1. Ask the model for its next move -------------------------
             let turn: AssistantTurn
             do {

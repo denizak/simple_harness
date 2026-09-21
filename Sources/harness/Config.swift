@@ -41,6 +41,11 @@ struct Config: Sendable {
     var maxTurns: Int = 25
     /// Truncation limit for tool output fed back to the model (chars).
     var maxToolOutput: Int = 20_000
+    /// Compact the history when its byte estimate exceeds this (0 = never).
+    /// ~4 bytes ≈ 1 token, so 100_000 ≈ 25k tokens of headroom spent.
+    var compactAboveBytes: Int = 100_000
+    /// How many recent messages to always keep verbatim when compacting.
+    var compactKeepTail: Int = 8
 
     /// The well-known provider catalog. All of these speak the OpenAI
     /// Chat Completions dialect, so one client covers them all.
@@ -102,6 +107,12 @@ struct Config: Sendable {
         if let value = env["HARNESS_BASE_URL"] { config.baseURL = value }
         if let value = env["HARNESS_API_KEY"] { config.apiKey = value }
         if let value = env["HARNESS_MODEL"] { config.model = value }
+        if let value = env["HARNESS_COMPACT_BYTES"], let parsed = Int(value) {
+            config.compactAboveBytes = parsed
+        }
+        if let value = env["HARNESS_COMPACT_KEEP_TAIL"], let parsed = Int(value) {
+            config.compactKeepTail = max(2, parsed)  // tail must stay splittable
+        }
 
         // 5. Explicit flags always win: --base-url/--api-key/--model.
         var iterator = arguments.makeIterator()
