@@ -87,12 +87,32 @@ struct Config: Sendable {
         let requested = flagValue("--provider", in: arguments)
         if let name = requested ?? env["HARNESS_PROVIDER"], let profile = Config.catalog[name.lowercased()] {
             config = apply(profile, env)
-            config.apiKey = resolvedKey(profile: profile, env: env, allowBorrow: true, current: config.apiKey)
+            config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey)
         } else if requested == nil && env["HARNESS_PROVIDER"] == nil {
+            // Two passes, so priority is by KEY KIND, not catalog position:
+            //   pass 1 — explicit env keys ALWAYS beat borrowed keys
+            //   pass 2 — profiles whose policy opted into autodetect
+            //            borrowing (deepseek), only if pass 1 found nothing
+            // (A single pass with hasEnvKey || canBorrow let deepseek's
+            // borrowed key outrank an explicit OPENAI_API_KEY — caught by
+            // the quirk selftest.)
+            var matched = false
             for name in Config.autodetectOrder {
                 guard let profile = Config.catalog[name], profile.key(in: env) != nil else { continue }
                 config = apply(profile, env)
+                config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey)
+                matched = true
                 break
+            }
+            if !matched {
+                for name in Config.autodetectOrder {
+                    guard let profile = Config.catalog[name],
+                          profile.keyResolution.borrowsForAutodetect,
+                          profile.borrowedKey() != nil else { continue }
+                    config = apply(profile, env)
+                    config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey)
+                    break
+                }
             }
         }
 
@@ -144,13 +164,12 @@ struct Config: Sendable {
         return config
     }
 
-    /// Key resolution for one profile: env keys first; then (when borrowing
-    /// is allowed) a pi-stored key from auth.json.
+    /// Key resolution for one profile: env keys first; then the profile's
+    /// own policy decides whether a pi-stored key may be borrowed.
     private static func resolvedKey(
-        profile: ProviderProfile, env: [String: String], allowBorrow: Bool, current: String
+        profile: ProviderProfile, env: [String: String], current: String
     ) -> String {
         if let envKey = profile.key(in: env) { return envKey }
-        guard allowBorrow else { return current }
         return profile.borrowedKey() ?? current
     }
 

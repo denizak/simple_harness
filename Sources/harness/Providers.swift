@@ -18,6 +18,37 @@ import Foundation
 // Adding a provider is ONE catalog entry. No switches, no string matching.
 // ---------------------------------------------------------------------------
 
+/// How a provider obtains its API key — the *policy* lives on the profile
+/// as data, so the resolver has one switch instead of interpreting flags:
+///   envOnly                      env keys, nothing else (local servers that
+///                                ignore keys land here too)
+///   envThenBorrow(entry)         env keys first; otherwise borrow pi's
+///                                auth.json entry — applied only when the
+///                                user explicitly names the provider
+///   envThenBorrowForAutodetect   same, and a borrowed key also satisfies
+///                                AUTODETECT (only deepseek: its zero-setup
+///                                default is shipped behavior)
+enum KeyResolution: Sendable {
+    case envOnly
+    case envThenBorrow(piAuthEntry: String)
+    case envThenBorrowForAutodetect(piAuthEntry: String)
+
+    /// The pi auth.json entry to borrow, if this policy borrows at all.
+    var borrowEntry: String? {
+        switch self {
+        case .envOnly: return nil
+        case .envThenBorrow(let entry): return entry
+        case .envThenBorrowForAutodetect(let entry): return entry
+        }
+    }
+
+    /// Whether a borrowed key may satisfy AUTODETECT (not just --provider).
+    var borrowsForAutodetect: Bool {
+        if case .envThenBorrowForAutodetect = self { return true }
+        return false
+    }
+}
+
 /// Which token-limit field the server accepts (a per-provider quirk):
 /// newer OpenAI models reject `max_tokens` and want `max_completion_tokens`.
 enum TokenLimitField: String, Sendable {
@@ -31,10 +62,8 @@ struct ProviderProfile: Sendable {
     /// Environment variables that may hold this provider's API key.
     var envKeys: [String]
     var defaultModel: String
-    /// ~/.pi/agent/auth.json entry to borrow when no env key is set —
-    /// applied ONLY when the user explicitly names the provider, so defaults
-    /// never silently move to a provider the user didn't choose.
-    var piAuthKey: String?
+    /// Key-acquisition policy — see KeyResolution.
+    var keyResolution: KeyResolution
     /// Token-limit field quirk (see TokenLimitField).
     var tokenLimitField: TokenLimitField
     /// May the client send stream_options.include_usage while streaming?
@@ -48,7 +77,7 @@ struct ProviderProfile: Sendable {
         baseURL: String,
         envKeys: [String],
         defaultModel: String,
-        piAuthKey: String? = nil,
+        keyResolution: KeyResolution = .envOnly,
         tokenLimitField: TokenLimitField = .maxTokens,
         sendsStreamOptions: Bool = false
     ) {
@@ -56,7 +85,7 @@ struct ProviderProfile: Sendable {
         self.baseURL = baseURL
         self.envKeys = envKeys
         self.defaultModel = defaultModel
-        self.piAuthKey = piAuthKey
+        self.keyResolution = keyResolution
         self.tokenLimitField = tokenLimitField
         self.sendsStreamOptions = sendsStreamOptions
     }
@@ -66,9 +95,10 @@ struct ProviderProfile: Sendable {
         envKeys.compactMap { env[$0] }.first
     }
 
-    /// Key borrowed from pi's stored auth, when this profile declares one.
+    /// Key borrowed from pi's stored auth, when this profile's policy
+    /// borrows at all.
     func borrowedKey() -> String? {
-        guard let entry = piAuthKey else { return nil }
+        guard let entry = keyResolution.borrowEntry else { return nil }
         return piAuthApiKey(entry)
     }
 }
@@ -89,7 +119,7 @@ extension Config {
             baseURL: "https://api.z.ai/api/paas/v4",
             envKeys: ["ZAI_API_KEY", "Z_AI_API_KEY", "ZHIPU_API_KEY"],
             defaultModel: "glm-4.6",
-            piAuthKey: "zai"
+            keyResolution: .envThenBorrow(piAuthEntry: "zai")
         ),
         // GLM Coding Plan (https://docs.z.ai/devpack/quick-start): the plan
         // has its OWN endpoints, separate from the standard platform API.
@@ -101,7 +131,7 @@ extension Config {
             baseURL: "https://api.z.ai/api/coding/paas/v4",
             envKeys: ["ZAI_CODING_API_KEY"],
             defaultModel: "glm-4.6",
-            piAuthKey: "zai"
+            keyResolution: .envThenBorrow(piAuthEntry: "zai")
         ),
         // China-region coding plan (matches pi's zai-coding-cn provider).
         "zai-coding-cn": ProviderProfile(
@@ -109,7 +139,7 @@ extension Config {
             baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
             envKeys: ["ZAI_CODING_CN_API_KEY"],
             defaultModel: "glm-5.3",
-            piAuthKey: "zai-coding-cn"
+            keyResolution: .envThenBorrow(piAuthEntry: "zai-coding-cn")
         ),
         // DeepSeek: OpenAI-compatible at the root (the client appends
         // /chat/completions). Models per docs: deepseek-flash, deepseek-v4-pro.
@@ -118,7 +148,7 @@ extension Config {
             baseURL: "https://api.deepseek.com",
             envKeys: ["DEEPSEEK_API_KEY"],
             defaultModel: "deepseek-flash",
-            piAuthKey: "deepseek"
+            keyResolution: .envThenBorrowForAutodetect(piAuthEntry: "deepseek")
         ),
         // Ollama Cloud: same OpenAI-compatible API as the local server, but
         // models run in Ollama's datacenter. Model ids are the raw tags from

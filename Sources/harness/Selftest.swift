@@ -290,6 +290,15 @@ enum SelfTest {
         let zaiQuirks = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"])
         check("zai quirk: no stream_options by default", zaiQuirks.streamOptions == false, "")
 
+        // DeepSeek's borrowed key also satisfies AUTODETECT (shipped
+        // zero-setup default) — gated on pi's auth.json actually existing,
+        // since the borrow reads from it.
+        if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") {
+            let borrowedDefault = Config.resolve(arguments: [], env: [:])
+            check("deepseek default via borrowed pi key",
+                  borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
+        }
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
