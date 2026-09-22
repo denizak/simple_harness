@@ -144,20 +144,25 @@ Provider quirks live in one place (`LLMClient.swift`):
 
 ## Testing
 
-Two flags, two layers — and they fail for different reasons:
+Three layers, three entry points — and they fail for different reasons:
 
 ```bash
-harness --selftest    # tool layer + pure loop math (no API call)
-                      # tools, compaction boundary rules, provider resolution
+swift test            # the CI entry point: swift-testing suite (always rebuilds
+                      # — no stale-binary trap), runs tests in PARALLEL
+harness --selftest    # the same tool layer + pure loop math as a CLI flag
 harness --e2e         # the LOOP with a scripted STUB MODEL (offline, ms-fast)
-                      #   …plus one LIVE round-trip against the provider
+                      #   …plus LIVE legs: provider round-trip + TypeSafe judge
 ```
 
 The e2e stub is the key idea: a scripted `ChatModel` drives the real agent
 with real tools in a temp directory, forcing compaction mid-task. It proves
 tool_calls parse, tools execute, results feed back, and the loop terminates —
-the 90% of a harness that never needs a network. The live leg then answers
+the 90% of a harness that never needs a network. The live legs then answer
 the only question the stub can't: does the request satisfy the real server?
+
+`swift test` needs a real SwiftPM test target — and that's also why testable
+logic lives in Sources/harness beside the thin `@main` entry: executables can
+be reached from tests only via `@testable import`.
 
 ## Design notes (what pi does, and why)
 

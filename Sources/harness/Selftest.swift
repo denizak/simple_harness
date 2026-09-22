@@ -4,31 +4,63 @@ import Foundation
 // Selftest.swift — verify the tool layer without an API call.
 //
 // A harness has two halves: the tool layer (deterministic, testable) and the
-// model loop (stochastic). `harness --selftest` exercises the first half so
-// you always know whether a failure is yours or the model's.
+// model loop (stochastic). `harness --selftest` exercises the tool layer AND
+// the pure loop math so you always know whether a failure is yours or the
+// model's. Each section is its own function: the file grew past every limit
+// as a single run() body, and small functions type-check faster too.
 //
-// Swift 6 note: `run()` is async because tools are async. We simply `await`
-// them in sequence — no semaphores or DispatchQueue bridging, which would
-// trip Swift 6's strict concurrency rules (mutation of captured vars across
-// threads). One task, one thread, easy to reason about.
+// Swift 6 note: run() is async because tools are async — we simply `await`
+// them in sequence. One task, one thread, no strict-concurrency friction.
 // ---------------------------------------------------------------------------
 
 enum SelfTest {
     static func run() async {
-        print("selftest: tool layer")
+        print("selftest: tool layer + pure loop math")
         var failures = 0
+        failures += await toolLayerChecks()
+        failures += await bashChecks()
+        failures += await grepChecks()
+        failures += compactionBoundaryChecks()
+        failures += providerResolutionChecks()
+        failures += typeSafeChecks()
+        failures += reasoningChecks()
+        failures += sseAssemblerChecks()
+        failures += await loadPrecedenceChecks()
+        print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
+        exit(failures == 0 ? 0 : 1)
+    }
 
-        // Local assertion helper: PASS/FAIL one check, count failures.
-        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
-            if condition {
-                print("  ✓ \(name)")
-            } else {
-                failures += 1
-                print(AgentUI.errorText("  ✗ \(name) \(detail)"))
-            }
+    /// PASS/FAIL one check and count the failure.
+    private static func check(
+        _ name: String, _ condition: Bool, _ detail: String, failures: inout Int
+    ) {
+        if condition {
+            print("  ✓ \(name)")
+        } else {
+            failures += 1
+            print(AgentUI.errorText("  ✗ \(name) \(detail)"))
         }
+    }
 
-        // ---- write_file / read_file roundtrip ------------------------------
+    /// Run one tool and turn any thrown error into a text report — the same
+    /// contract the agent loop relies on (tools report; they don't throw).
+    private static func runTool(_ body: () async throws -> String) async -> String {
+        do { return try await body() } catch { return "error: \(error.localizedDescription)" }
+    }
+
+    /// A ToolContext for direct tool calls in tests (dummy model — the tools
+    /// under test here never touch it; only spawn_agent would).
+    private static func testContext(_ cwd: String, depth: Int = 0) -> ToolContext {
+        let config = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none", model: "stub")
+        return ToolContext(config: config, model: OpenAICompatClient(config: config), cwd: cwd, depth: depth)
+    }
+
+    // ---- write_file / read_file / edit_file --------------------------------
+    private static func toolLayerChecks() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
         let path = NSTemporaryDirectory() + "harness-selftest-\(UUID().uuidString).txt"
         let content: [String: JSONValue] = ["path": .string(path), "content": .string("alpha\nbeta\ngamma")]
         var output = await runTool { try await Tools.writeFile.run(content, testContext(".")) }
@@ -46,16 +78,14 @@ enum SelfTest {
         // ---- edit_file: unique replace, not-found, ambiguous ---------------
         output = await runTool {
             try await Tools.editFile.run(
-                ["path": .string(path),
-                 "old_text": .string("beta"),
+                ["path": .string(path), "old_text": .string("beta"),
                  "new_text": .string("BETA")] as [String: JSONValue], testContext("."))
         }
         check("edit_file unique replace", output.contains("edited"), output)
 
         output = await runTool {
             try await Tools.editFile.run(
-                ["path": .string(path),
-                 "old_text": .string("nope"),
+                ["path": .string(path), "old_text": .string("nope"),
                  "new_text": .string("x")] as [String: JSONValue], testContext("."))
         }
         check("edit_file rejects missing text", output.contains("not found"), output)
@@ -63,14 +93,31 @@ enum SelfTest {
         // "a" appears twice ("alpha", "gamma") — must refuse without replace_all.
         output = await runTool {
             try await Tools.editFile.run(
-                ["path": .string(path), "old_text": .string("a"), "new_text": .string("x")] as [String: JSONValue], testContext("."))
+                ["path": .string(path), "old_text": .string("a"),
+                 "new_text": .string("x")] as [String: JSONValue], testContext("."))
         }
         check("edit_file rejects ambiguous text", output.contains("appears"), output)
 
-        // ---- bash: stdout capture, exit codes, watchdog timeout ------------
-        output = await runTool {
-            try await Tools.bash.run(
-                ["command": .string("echo hello-selftest")] as [String: JSONValue], testContext("."))
+        // ---- spawn_agent: depth cap enforced textually ----------------------
+        output = await runTool { try await Tools.spawnAgent.run(["task": .string("x")] as [String: JSONValue], testContext(".", depth: 2)) }
+        check("spawn_agent refuses at depth cap", output.contains("depth limit"), output)
+
+        // ---- JSONValue roundtrip --------------------------------------------
+        let parsed = JSONValue.parse(#"{"a": [1, "two", true], "b": null}"#)
+        check("JSONValue.parse", parsed?.objectValue?["a"]?.arrayValue?.count == 3, "")
+
+        try? FileManager.default.removeItem(atPath: path)
+        return failures
+    }
+
+    // ---- bash: stdout capture, exit codes, watchdog timeout ----------------
+    private static func bashChecks() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        var output = await runTool {
+            try await Tools.bash.run(["command": .string("echo hello-selftest")] as [String: JSONValue], testContext("."))
         }
         check("bash stdout", output.contains("hello-selftest") && output.contains("exit code: 0"), output)
 
@@ -83,14 +130,15 @@ enum SelfTest {
                 ["command": .string("sleep 5"), "timeout_seconds": .number(1)] as [String: JSONValue], testContext("."))
         }
         check("bash timeout kill", output.contains("signal") || output.contains("exit code: 15"), output)
+        return failures
+    }
 
-        try? FileManager.default.removeItem(atPath: path)
-
-        // ---- JSONValue roundtrip --------------------------------------------
-        let parsed = JSONValue.parse(#"{"a": [1, "two", true], "b": null}"#)
-        check("JSONValue.parse", parsed?.objectValue?["a"]?.arrayValue?.count == 3, "")
-
-        // ---- grep: regex search across a small tree -------------------------
+    // ---- grep: regex search across a small tree -----------------------------
+    private static func grepChecks() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
         // The tree mirrors real projects: nested dirs, mixed case, and a
         // subdirectory to prove the walk recurses.
         let grepDir = NSTemporaryDirectory() + "harness-grep-\(UUID().uuidString)/"
@@ -98,16 +146,14 @@ enum SelfTest {
         try? "needle here\nother line\n".write(toFile: grepDir + "a.txt", atomically: true, encoding: .utf8)
         try? "NEEDLE upper\n".write(toFile: grepDir + "sub/b.md", atomically: true, encoding: .utf8)
 
-        output = await runTool {
-            try await Tools.grep.run(
-                ["pattern": .string("needle"), "path": .string(grepDir)] as [String: JSONValue], testContext("."))
+        var output = await runTool {
+            try await Tools.grep.run(["pattern": .string("needle"), "path": .string(grepDir)] as [String: JSONValue], testContext("."))
         }
         check("grep default (case-sensitive) misses NEEDLE", output.contains("a.txt:1") && !output.contains("b.md"), output)
 
         output = await runTool {
             try await Tools.grep.run(
-                ["pattern": .string("needle"),
-                 "path": .string(grepDir),
+                ["pattern": .string("needle"), "path": .string(grepDir),
                  "ignore_case": .bool(true)] as [String: JSONValue], testContext("."))
         }
         check("grep ignore_case hits both files", output.contains("NEEDLE upper") && output.contains("a.txt:1"), output)
@@ -118,12 +164,19 @@ enum SelfTest {
         }
         check("grep reports no matches", output.contains("no matches"), output)
         try? FileManager.default.removeItem(atPath: grepDir)
+        return failures
+    }
 
-        // ---- compaction boundary math (pure functions, no API call) ---------
-        // The tail must start at a plain user message so no tool_call loses
-        // its tool result. History shape (indexes):
-        //   0 system | 1 user | 2 assistant→tools | 3 tool | 4 assistant
-        //   | 5 user | 6 assistant→tools | 7 tool | 8 assistant
+    // ---- compaction boundary math (pure functions, no API call) -------------
+    // The tail must not start on a tool result, or the tool_call that
+    // requested it loses its answer. History shape (indexes):
+    //   0 system | 1 user | 2 assistant→tools | 3 tool | 4 assistant
+    //   | 5 user | 6 assistant→tools | 7 tool | 8 assistant
+    private static func compactionBoundaryChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
         let fixtureCall = ToolCall(id: "call_1", type: "function", function: .init(name: "bash", arguments: "{}"))
         let assistantAsking = Message(role: "assistant", content: nil, toolCalls: [fixtureCall], toolCallId: nil, name: nil)
         let history: [Message] = [
@@ -146,8 +199,15 @@ enum SelfTest {
         check("compaction boundary rejects tool results",
               !Compaction.isCleanBoundary(history[3]) && !Compaction.isCleanBoundary(history[7]), "")  // pi-lens-ignore: SourceKit:unknown
         check("compaction boundary accepts assistant tool_calls", Compaction.isCleanBoundary(history[6]), "")
+        return failures
+    }
 
-        // ---- config resolution: provider autodetect (pure, no API) ---------
+    // ---- config resolution: provider autodetect + key policies --------------
+    private static func providerResolutionChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
         // Env is injected, so this never touches real secrets.
         let cloud = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "stub-key"])
         check("ollama-cloud autodetect (OLLAMA_API_KEY)",
@@ -181,10 +241,113 @@ enum SelfTest {
             check("zai-coding-cn borrows pi's stored key", codingCN.apiKey != "none", "apiKey=none")
         }
 
-        // ---- SSE assembler: delta stitching without any network -------------
-        // These are the four shapes a streaming provider sends: text deltas,
-        // tool_call fragments (name first, arguments appended across chunks),
-        // the finish chunk, and a usage-only final chunk.
+        // ---- DeepSeek: provider resolution with the env key -----------------
+        let deepseek = Config.resolve(arguments: [], env: ["DEEPSEEK_API_KEY": "sk-test"])
+        check("deepseek autodetect (DEEPSEEK_API_KEY)",
+              deepseek.provider == "deepseek" && deepseek.baseURL == "https://api.deepseek.com"
+                  && deepseek.model == "deepseek-flash",
+              "provider=\(deepseek.provider) model=\(deepseek.model)")
+
+        // DeepSeek's borrowed key also satisfies AUTODETECT (shipped
+        // zero-setup default) — gated on pi's auth.json actually existing,
+        // since the borrow reads from it.
+        if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") {
+            let borrowedDefault = Config.resolve(arguments: [], env: [:])
+            check("deepseek default via borrowed pi key",
+                  borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
+        }
+
+        // ---- provider quirks are data on the profile (modular config) ------
+        let openaiQuirks = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"])
+        check("openai quirk: max_completion_tokens",
+              openaiQuirks.tokenLimitKey == "max_completion_tokens", openaiQuirks.tokenLimitKey)
+        let cloudQuirks = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"])
+        check("ollama-cloud quirk: stream_options allowed", cloudQuirks.streamOptions, "")
+        let zaiQuirks = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"])
+        check("zai quirk: no stream_options by default", zaiQuirks.streamOptions == false, "")
+        return failures
+    }
+
+    // ---- TypeSafe: request building + answer formatting (pure) --------------
+    private static func typeSafeChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        let judged = [
+            TypeSafeQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
+                             criteria: .object(["true": .string("Time-sensitive"),
+                                                "false": .string("No urgency")])),
+            TypeSafeQuestion(id: "team", type: "choice", instructions: "Which team?",
+                             criteria: .object(["billing": .string("Payments"),
+                                                "tech": .string("Bugs")])),
+            TypeSafeQuestion(id: "severity", type: "score", instructions: "How severe?",
+                             criteria: .array([.string("Low"), .string("High")])),
+        ]
+        let safeRequest = TypeSafeClient.request(state: "server down", questions: judged)
+        let requestFields = safeRequest.objectValue ?? [:]
+        check("TypeSafe request shape",
+              requestFields["model"]?.stringValue == "jev-latest"
+                  && requestFields["state"]?.stringValue == "server down"
+                  && requestFields["questions"]?.objectValue?.count == 3,
+              "keys=\(requestFields.keys.sorted().joined(separator: ","))")
+        check("TypeSafe noul criteria carried into the request",
+              requestFields["questions"]?.objectValue?["urgent"]?.objectValue?["criteria"]?
+                  .objectValue?["true"]?.stringValue == "Time-sensitive", "")
+        // Formatting: the documented response shape renders model-readable lines.
+        let sampleJSON = #"{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95},"# +
+            #""team":{"type":"choice","choice":"billing","probabilities":{"billing":0.88,"tech":0.12},"confidence":0.81}}}"#
+        let sampleResponse = JSONValue.parse(sampleJSON) ?? .null
+        let rendered = TypeSafeClient.format(sampleResponse)
+        check("TypeSafe format renders probabilities",
+              rendered.contains("95%") && rendered.contains("billing") && rendered.contains("0.81"),
+              rendered.replacingOccurrences(of: "\n", with: " | "))
+        return failures
+    }
+
+    // ---- reasoning_effort: provider quirk handling (pure) -------------------
+    // Request building is pure, so the body can be inspected directly.
+    private static func reasoningChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        let quirky = OpenAICompatClient(config: Config(
+            provider: "quirky", baseURL: "https://example.com/v1", apiKey: "none", model: "gpt-5.6-luna"))
+        do {
+            let (plainBody, _) = try quirky.requestFor(
+                messages: [.user("hi")], tools: [Tools.grep], streaming: false)
+            check("reasoning_effort absent by default", plainBody["reasoning_effort"] == nil, "")
+            let (overriddenBody, _) = try quirky.requestFor(
+                messages: [.user("hi")], tools: [], streaming: false,
+                overrides: ["reasoning_effort": .string("none")])
+            check("reasoning_effort override lands in body",
+                  overriddenBody["reasoning_effort"] == .string("none"), "")
+        } catch {
+            check("reasoning_effort request builds", false, "\(error)")
+        }
+        check("config-driven reasoning effort",
+              Config.resolve(arguments: ["--reasoning", "high"], env: [:]).reasoningEffort == "high", "")
+        let conflict = LLMError(status: 400, body:
+            "Function tools with reasoning_effort are not supported for gpt-5.6-luna.")
+        check("conflict detected for the self-healing retry",
+              OpenAICompatClient.isReasoningToolConflict(conflict)
+                  && OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: true)
+                  && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 1, sentEffort: true)
+                  && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: false),
+              "")
+        return failures
+    }
+
+    // ---- SSE assembler: delta stitching without any network -----------------
+    // The four shapes a streaming provider sends: text deltas, tool_call
+    // fragments (name first, arguments appended across chunks), the finish
+    // chunk, and a usage-only final chunk.
+    private static func sseAssemblerChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
         var assembler = SSEAssembler()
         // Raw strings let the JSON keep its plain quotes; the \" sequences
         // inside "arguments" are the JSON-escaped quotes the fragment needs.
@@ -210,98 +373,17 @@ enum SelfTest {
               assembled.toolCalls.first.map { "\($0.function.name) \($0.function.arguments)" } ?? "none")
         check("SSE: finish reason + usage captured",
               assembled.finishReason == "tool_calls" && assembled.usage?.promptTokens == 10, "")
+        return failures
+    }
 
-        // ---- spawn_agent: depth cap enforced textually ----------------------
-        let capped = testContext(".", depth: 2)
-        output = await runTool { try await Tools.spawnAgent.run(["task": .string("x")] as [String: JSONValue], capped) }
-        check("spawn_agent refuses at depth cap", output.contains("depth limit"), output)
-
-        // ---- DeepSeek: provider resolution with the env key -----------------
-        let deepseek = Config.resolve(arguments: [], env: ["DEEPSEEK_API_KEY": "sk-test"])
-        check("deepseek autodetect (DEEPSEEK_API_KEY)",
-              deepseek.provider == "deepseek" && deepseek.baseURL == "https://api.deepseek.com"
-                  && deepseek.model == "deepseek-flash",
-              "provider=\(deepseek.provider) model=\(deepseek.model)")
-
-        // ---- TypeSafe: request building + answer formatting (pure) ----------
-        let judged = [
-            TypeSafeQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
-                             criteria: .object(["true": .string("Time-sensitive"),
-                                                "false": .string("No urgency")])),
-            TypeSafeQuestion(id: "team", type: "choice", instructions: "Which team?",
-                             criteria: .object(["billing": .string("Payments"),
-                                                "tech": .string("Bugs")])),
-            TypeSafeQuestion(id: "severity", type: "score", instructions: "How severe?",
-                             criteria: .array([.string("Low"), .string("High")])),
-        ]
-        let safeRequest = TypeSafeClient.request(state: "server down", questions: judged)
-        let requestFields = safeRequest.objectValue ?? [:]
-        check("TypeSafe request shape",
-              requestFields["model"]?.stringValue == "jev-latest"
-                  && requestFields["state"]?.stringValue == "server down"
-                  && requestFields["questions"]?.objectValue?.count == 3,
-              "keys=\(requestFields.keys.sorted().joined(separator: ","))")
-        check("TypeSafe noul criteria carried into the request",
-              requestFields["questions"]?.objectValue?["urgent"]?.objectValue?["criteria"]?
-                  .objectValue?["true"]?.stringValue == "Time-sensitive", "")
-        // Formatting: the documented response shape renders model-readable lines.
-        // Formatting: the documented response shape renders model-readable lines.
-        let sampleJSON = #"{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95},"# +
-            #""team":{"type":"choice","choice":"billing","probabilities":{"billing":0.88,"tech":0.12},"confidence":0.81}}}"#
-        let sampleResponse = JSONValue.parse(sampleJSON) ?? .null
-        let rendered = TypeSafeClient.format(sampleResponse)
-        check("TypeSafe format renders probabilities",
-              rendered.contains("95%") && rendered.contains("billing") && rendered.contains("0.81"),
-              rendered.replacingOccurrences(of: "\n", with: " | "))
-
-        // ---- reasoning_effort: provider quirk handling (pure) ---------------
-        // Request building is pure, so the body can be inspected directly.
-        let quirky = OpenAICompatClient(config: Config(
-            provider: "quirky", baseURL: "https://example.com/v1", apiKey: "none", model: "gpt-5.6-luna"))
-        do {
-            let (plainBody, _) = try quirky.requestFor(
-                messages: [.user("hi")], tools: [Tools.grep], streaming: false)
-            check("reasoning_effort absent by default", plainBody["reasoning_effort"] == nil, "")
-            let (overriddenBody, _) = try quirky.requestFor(
-                messages: [.user("hi")], tools: [], streaming: false,
-                overrides: ["reasoning_effort": .string("none")])
-            check("reasoning_effort override lands in body",
-                  overriddenBody["reasoning_effort"] == .string("none"), "")
-        } catch {
-            check("reasoning_effort request builds", false, "\(error)")
+    // ---- /load precedence: a session must not override launch config --------
+    // Deterministic, no API: write sessions recorded on different endpoints
+    // and confirm the launch model survives a mismatch.
+    private static func loadPrecedenceChecks() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
         }
-        check("config-driven reasoning effort",
-              Config.resolve(arguments: ["--reasoning", "high"], env: [:]).reasoningEffort == "high", "")
-        let conflict = LLMError(status: 400, body:
-            "Function tools with reasoning_effort are not supported for gpt-5.6-luna.")
-        check("conflict detected for the self-healing retry",
-              OpenAICompatClient.isReasoningToolConflict(conflict)
-                  && OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: true)
-                  && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 1, sentEffort: true)
-                  && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: false),
-              "")
-
-        // ---- provider quirks are data on the profile (modular config) ------
-        let openaiQuirks = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"])
-        check("openai quirk: max_completion_tokens",
-              openaiQuirks.tokenLimitKey == "max_completion_tokens", openaiQuirks.tokenLimitKey)
-        let cloudQuirks = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"])
-        check("ollama-cloud quirk: stream_options allowed", cloudQuirks.streamOptions, "")
-        let zaiQuirks = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"])
-        check("zai quirk: no stream_options by default", zaiQuirks.streamOptions == false, "")
-
-        // DeepSeek's borrowed key also satisfies AUTODETECT (shipped
-        // zero-setup default) — gated on pi's auth.json actually existing,
-        // since the borrow reads from it.
-        if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") {
-            let borrowedDefault = Config.resolve(arguments: [], env: [:])
-            check("deepseek default via borrowed pi key",
-                  borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
-        }
-
-        // ---- /load precedence: a session must not override launch config ----
-        // Deterministic, no API: write sessions recorded on different
-        // endpoints and confirm the launch model survives a mismatch.
         do {
             let sessionDir = NSTemporaryDirectory() + "harness-load-\(UUID().uuidString)/"
             try FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
@@ -338,21 +420,6 @@ enum SelfTest {
         } catch {
             check("/load precedence checks ran", false, "\(error)")
         }
-
-        print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
-        exit(failures == 0 ? 0 : 1)
-    }
-
-    /// Run one tool and turn any thrown error into a text report — the same
-    /// contract the agent loop relies on (tools report; they don't throw).
-    private static func runTool(_ body: () async throws -> String) async -> String {
-        do { return try await body() } catch { return "error: \(error.localizedDescription)" }
-    }
-
-    /// A ToolContext for direct tool calls in tests (dummy model — the tools
-    /// under test here never touch it; only spawn_agent would).
-    private static func testContext(_ cwd: String, depth: Int = 0) -> ToolContext {
-        let config = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none", model: "stub")
-        return ToolContext(config: config, model: OpenAICompatClient(config: config), cwd: cwd, depth: depth)
+        return failures
     }
 }
