@@ -110,6 +110,21 @@ If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
 `/models` lists what the current provider offers.
 
+### GLM Coding Plan (Z.ai)
+
+The coding plan has its own endpoints, separate from the standard platform
+API ([quick-start](https://docs.z.ai/devpack/quick-start)). Both profiles are
+**opt-in** via `--provider` — a plan's quota is never used by accident, and
+keys may be borrowed from pi's stored auth:
+
+| Provider | Endpoint | Key source |
+| --- | --- | --- |
+| `zai-coding` | `https://api.z.ai/api/coding/paas/v4` | `ZAI_CODING_API_KEY`, or borrows pi's `zai` key |
+| `zai-coding-cn` | `https://open.bigmodel.cn/api/coding/paas/v4` | `ZAI_CODING_CN_API_KEY`, or borrows pi's `zai-coding-cn` key |
+
+On a machine where pi holds a `zai-coding-cn` api_key:
+`harness --provider zai-coding-cn` works with zero setup.
+
 Ollama Cloud notes ([docs](https://docs.ollama.com/cloud)): model ids are the
 raw tags from `https://ollama.com/api/tags` (e.g. `kimi-k2.7-code`); the
 `:cloud` suffix is only for a signed-in local server. `tool_choice` is not

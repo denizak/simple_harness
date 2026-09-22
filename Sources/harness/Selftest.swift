@@ -158,10 +158,28 @@ enum SelfTest {
         check("--provider overrides autodetect",
               forced.provider == "openai" && forced.baseURL == "https://api.openai.com/v1",
               "provider=\(forced.provider)")
-        let noKeys = Config.resolve(arguments: [], env: [:])
-        check("no keys → falls back to default provider",
-              noKeys.provider != "ollama-cloud" && noKeys.provider != "zai" && noKeys.provider != "openai",
-              "provider=\(noKeys.provider)")
+        // Autodetect order: zai beats deepseek when both env keys exist.
+        let both = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "z", "DEEPSEEK_API_KEY": "d"])
+        check("autodetect order (zai before deepseek)", both.provider == "zai", "provider=\(both.provider)")
+
+        // GLM Coding Plan: opt-in endpoints (never autodetected — plan quota
+        // must not be silently routed to).
+        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:])
+        check("zai-coding-cn (CN plan) endpoint",
+              codingCN.provider == "zai-coding-cn"
+                  && codingCN.baseURL == "https://open.bigmodel.cn/api/coding/paas/v4"
+                  && codingCN.model == "glm-5.3",
+              "provider=\(codingCN.provider) model=\(codingCN.model)")
+        let codingIntl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:])
+        check("zai-coding (international plan) endpoint",
+              codingIntl.provider == "zai-coding"
+                  && codingIntl.baseURL == "https://api.z.ai/api/coding/paas/v4",
+              "provider=\(codingIntl.provider)")
+        // Key borrowing from pi's auth.json is environment-dependent: assert
+        // only when the file is actually there.
+        if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") {
+            check("zai-coding-cn borrows pi's stored key", codingCN.apiKey != "none", "apiKey=none")
+        }
 
         // ---- SSE assembler: delta stitching without any network -------------
         // These are the four shapes a streaming provider sends: text deltas,

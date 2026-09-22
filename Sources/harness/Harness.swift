@@ -69,7 +69,8 @@ struct HarnessMain {
         if arguments.contains("--help") || arguments.contains("-h") {
             print("""
             usage: harness [options] [--once "task"]
-                  --provider NAME   openai | zai | ollama (env keys: OPENAI_API_KEY, ZAI_API_KEY)
+                  --provider NAME   ollama | ollama-cloud | zai | zai-coding | zai-coding-cn |
+                                    deepseek | openai
                   --model ID        model id override
                   --base-url URL    API endpoint override (OpenAI-compatible /chat/completions)
                   --api-key KEY     API key override

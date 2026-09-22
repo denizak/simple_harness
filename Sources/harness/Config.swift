@@ -84,6 +84,24 @@ struct Config: Sendable {
             envKeys: ["DEEPSEEK_API_KEY"],
             defaultModel: "deepseek-flash"
         ),
+        // GLM Coding Plan (https://docs.z.ai/devpack/quick-start): the plan
+        // has its OWN endpoints, separate from the standard platform API.
+        // Opt-in only (--provider) — a coding-plan key's quota must not be
+        // silently routed to by autodetect. Keys may borrow from pi's
+        // auth.json (zai for international, zai-coding-cn for the CN plan).
+        "zai-coding": ProviderProfile(
+            name: "zai-coding",
+            baseURL: "https://api.z.ai/api/coding/paas/v4",
+            envKeys: ["ZAI_CODING_API_KEY"],
+            defaultModel: "glm-4.6"
+        ),
+        // China-region coding plan (matches pi's zai-coding-cn provider).
+        "zai-coding-cn": ProviderProfile(
+            name: "zai-coding-cn",
+            baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
+            envKeys: ["ZAI_CODING_CN_API_KEY"],
+            defaultModel: "glm-5.3"
+        ),
         // Ollama Cloud: same OpenAI-compatible API as the local server, but
         // models run in Ollama's datacenter. Model ids are the raw tags from
         // https://ollama.com/api/tags (e.g. "kimi-k2.7-code") — the ":cloud"
@@ -119,7 +137,7 @@ struct Config: Sendable {
         // DeepSeek key there but no env var, borrow it so `--provider
         // deepseek` works with zero setup. (Same spirit as the models.json
         // fallback below.)
-        if env["DEEPSEEK_API_KEY"] == nil, let borrowed = piDeepSeekKey() {
+        if env["DEEPSEEK_API_KEY"] == nil, let borrowed = piAuthApiKey("deepseek") {
             env["DEEPSEEK_API_KEY"] = borrowed
         }
         var config = Config(
@@ -151,6 +169,19 @@ struct Config: Sendable {
                     config = apply(profile, env)
                     break
                 }
+            }
+        }
+
+        // 3b. Explicitly-requested providers may borrow keys pi has stored
+        // (opt-in only: coding-plan endpoints are quota-limited, so they
+        // never win autodetect silently).
+        if config.apiKey == "none" {
+            switch config.provider {
+            case "deepseek":     config.apiKey = piAuthApiKey("deepseek") ?? config.apiKey
+            case "zai":          config.apiKey = piAuthApiKey("zai") ?? config.apiKey
+            case "zai-coding":   config.apiKey = piAuthApiKey("zai") ?? config.apiKey
+            case "zai-coding-cn": config.apiKey = piAuthApiKey("zai-coding-cn") ?? config.apiKey
+            default: break
             }
         }
 
@@ -198,15 +229,15 @@ struct Config: Sendable {
         )
     }
 
-    /// DeepSeek key stored by pi in ~/.pi/agent/auth.json, if present.
-    /// Only valid "api_key"-typed entries are used (OAuth tokens are not
-    /// DeepSeek API keys).
-    private static func piDeepSeekKey() -> String? {
+    /// API key stored by pi in ~/.pi/agent/auth.json for a provider, if
+    /// present. Only "api_key"-typed entries are used (OAuth tokens are not
+    /// plain API keys).
+    private static func piAuthApiKey(_ provider: String) -> String? {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".pi/agent/auth.json")
         guard let data = try? Data(contentsOf: path),
               let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
-              let entry = root.objectValue?["deepseek"]?.objectValue else { return nil }
+              let entry = root.objectValue?[provider]?.objectValue else { return nil }
         let type = entry["type"]?.stringValue ?? ""
         let key = entry["key"]?.stringValue ?? ""
         return type.lowercased() == "api_key" && !key.isEmpty ? key : nil
