@@ -93,7 +93,9 @@ All providers speak the OpenAI Chat Completions dialect — one client covers al
 
 Autodetect: the first provider with a key in the environment wins, in the
 order **ollama-cloud → zai → deepseek → openai** (set `--provider` to be
-explicit). DeepSeek also borrows a key stored in pi's `auth.json`.
+explicit). pi-stored keys (`auth.json`) are borrowed **only** when you name
+the provider — `--provider deepseek` / `zai-coding-cn` work with zero setup,
+and an explicit env key always outranks a borrowed one.
 Every value is overridable:
 
 ```bash

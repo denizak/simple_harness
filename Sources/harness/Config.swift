@@ -1,35 +1,24 @@
 import Foundation
 
 // ---------------------------------------------------------------------------
-// Config.swift — where configuration comes from.
+// Config.swift — runtime configuration and its resolution.
 //
 // A "provider" in a harness is just: base URL + API key + model id, all
-// speaking the same OpenAI-compatible dialect. This file maps a few well-known
-// providers to environment variables and resolves the final configuration.
+// speaking the same OpenAI-compatible dialect. WHICH providers exist and
+// what wire quirks each one has lives in Providers.swift — as data on the
+// profile. This file only RESOLVES the final configuration:
 //
 // Resolution order (later wins):
 //   1. hardcoded default (local Ollama)
 //   2. pi's ~/.pi/agent/models.json (reuse a provider this machine has)
-//   3. provider catalog via --provider flag
-//   4. environment variables (OPENAI_API_KEY / ZAI_API_KEY / HARNESS_*)
-//   5. command-line flags (--base-url/--api-key/--model/--reasoning)
+//   3. provider catalog via --provider flag (may borrow a pi-stored key)
+//   4. autodetect: first profile in autodetectOrder with an env key
+//   5. environment variables (HARNESS_BASE_URL / HARNESS_API_KEY / …)
+//   6. command-line flags (--base-url/--api-key/--model/--reasoning)
 //
-// Supported providers out of the box:
-//   ollama   local proxy (default; no key needed here)
-//   openai   ChatGPT/OpenAI API   → set OPENAI_API_KEY
-//   zai      Z.ai (Zhipu GLM)     → set ZAI_API_KEY
+// Adding a provider = one entry in Config.catalog (Providers.swift). No
+// switches, no string matching in the client.
 // ---------------------------------------------------------------------------
-
-struct ProviderProfile: Sendable {
-    var name: String
-    var baseURL: String
-    var envKeys: [String]        // env vars that hold this provider's API key
-    var defaultModel: String
-
-    func key(in env: [String: String]) -> String? {
-        envKeys.compactMap { env[$0] }.first
-    }
-}
 
 struct Config: Sendable {
     var provider: String
@@ -59,71 +48,14 @@ struct Config: Sendable {
     /// TypeSafe API key (https://docs.typesafe.ai) — powers the `judge` tool.
     /// Read from the environment; optional — the tool reports its absence.
     var typesafeApiKey: String?
-
-    /// The well-known provider catalog. All of these speak the OpenAI
-    /// Chat Completions dialect, so one client covers them all.
-    static let catalog: [String: ProviderProfile] = [
-        "openai": ProviderProfile(
-            name: "openai",
-            baseURL: "https://api.openai.com/v1",
-            envKeys: ["OPENAI_API_KEY"],
-            defaultModel: "gpt-4o-mini"
-        ),
-        "zai": ProviderProfile(
-            name: "zai",
-            baseURL: "https://api.z.ai/api/paas/v4",
-            envKeys: ["ZAI_API_KEY", "Z_AI_API_KEY", "ZHIPU_API_KEY"],
-            defaultModel: "glm-4.6"
-        ),
-        // DeepSeek: OpenAI-compatible at the root (our client appends
-        // /chat/completions). Models per docs: deepseek-flash, deepseek-v4-pro.
-        // Optional thinking controls exist ("thinking", "reasoning_effort").
-        "deepseek": ProviderProfile(
-            name: "deepseek",
-            baseURL: "https://api.deepseek.com",
-            envKeys: ["DEEPSEEK_API_KEY"],
-            defaultModel: "deepseek-flash"
-        ),
-        // GLM Coding Plan (https://docs.z.ai/devpack/quick-start): the plan
-        // has its OWN endpoints, separate from the standard platform API.
-        // Opt-in only (--provider) — a coding-plan key's quota must not be
-        // silently routed to by autodetect. Keys may borrow from pi's
-        // auth.json (zai for international, zai-coding-cn for the CN plan).
-        "zai-coding": ProviderProfile(
-            name: "zai-coding",
-            baseURL: "https://api.z.ai/api/coding/paas/v4",
-            envKeys: ["ZAI_CODING_API_KEY"],
-            defaultModel: "glm-4.6"
-        ),
-        // China-region coding plan (matches pi's zai-coding-cn provider).
-        "zai-coding-cn": ProviderProfile(
-            name: "zai-coding-cn",
-            baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
-            envKeys: ["ZAI_CODING_CN_API_KEY"],
-            defaultModel: "glm-5.3"
-        ),
-        // Ollama Cloud: same OpenAI-compatible API as the local server, but
-        // models run in Ollama's datacenter. Model ids are the raw tags from
-        // https://ollama.com/api/tags (e.g. "kimi-k2.7-code") — the ":cloud"
-        // suffix is only for a signed-in LOCAL server proxying to the cloud.
-        // Docs: https://docs.ollama.com/cloud
-        "ollama-cloud": ProviderProfile(
-            name: "ollama-cloud",
-            baseURL: "https://ollama.com/v1",
-            envKeys: ["OLLAMA_API_KEY"],
-            defaultModel: "kimi-k2.7-code"
-        ),
-        "ollama": ProviderProfile(
-            name: "ollama",
-            baseURL: "http://127.0.0.1:11434/v1",
-            envKeys: ["HARNESS_API_KEY"],
-            defaultModel: "glm-5.3-flash:cloud"
-        ),
-    ]
-
-    /// Provider ids checked, in order, when no --provider flag is given:
-    /// the first one with an API key in the environment wins.
-    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
+    /// Wire-format quirk resolved from the provider profile: which
+    /// token-limit field the server accepts ("max_tokens" or, for newer
+    /// OpenAI models, "max_completion_tokens").
+    var tokenLimitKey: String = "max_tokens"
+    /// Wire-format quirk resolved from the provider profile: may the client
+    /// send stream_options.include_usage while streaming? (Ollama-family
+    /// servers accept it; some gateways validate strictly and reject it.)
+    var streamOptions: Bool = false
 
     static func resolve(arguments: [String]) -> Config {
         resolve(arguments: arguments, env: ProcessInfo.processInfo.environment)
@@ -132,14 +64,6 @@ struct Config: Sendable {
     /// Injectable-environment variant so the selftest can verify provider
     /// selection without touching real secrets.
     static func resolve(arguments: [String], env: [String: String]) -> Config {
-        var env = env
-        // pi stores API keys in ~/.pi/agent/auth.json; when the user has a
-        // DeepSeek key there but no env var, borrow it so `--provider
-        // deepseek` works with zero setup. (Same spirit as the models.json
-        // fallback below.)
-        if env["DEEPSEEK_API_KEY"] == nil, let borrowed = piAuthApiKey("deepseek") {
-            env["DEEPSEEK_API_KEY"] = borrowed
-        }
         var config = Config(
             provider: "ollama",
             baseURL: "http://127.0.0.1:11434/v1",
@@ -150,38 +74,25 @@ struct Config: Sendable {
         // 2. Borrow provider config from pi, if present.
         if let pi = piProviderConfig() {
             config = Config(provider: "pi", baseURL: pi.baseURL, apiKey: pi.apiKey, model: pi.model)
+            // The borrowed provider may be the local Ollama proxy, which
+            // accepts stream_options (it IS the Ollama server).
+            config.streamOptions = pi.baseURL.contains("11434")
         }
 
-        // 3. Provider catalog. --provider X wins; otherwise the first
-        // provider in autodetectOrder with an API key in the environment wins
-        // (set --provider to override the deterministic default order).
+        // 3. Provider catalog. --provider X wins; otherwise the first profile
+        // in autodetectOrder with an API key in the environment wins.
+        // Autodetect uses ENV KEYS ONLY: a pi-stored borrowed key must never
+        // outrank an explicit env key or silently move the default to a paid
+        // cloud API. Borrowing applies when the user names the provider.
         let requested = flagValue("--provider", in: arguments)
-        if let name = requested ?? env["HARNESS_PROVIDER"], let profile = catalog[name.lowercased()] {
-            config = Config(
-                provider: profile.name,
-                baseURL: profile.baseURL,
-                apiKey: profile.key(in: env) ?? "none",
-                model: profile.defaultModel
-            )
+        if let name = requested ?? env["HARNESS_PROVIDER"], let profile = Config.catalog[name.lowercased()] {
+            config = apply(profile, env)
+            config.apiKey = resolvedKey(profile: profile, env: env, allowBorrow: true, current: config.apiKey)
         } else if requested == nil && env["HARNESS_PROVIDER"] == nil {
-            for name in autodetectOrder {
-                if let profile = catalog[name], profile.key(in: env) != nil {
-                    config = apply(profile, env)
-                    break
-                }
-            }
-        }
-
-        // 3b. Explicitly-requested providers may borrow keys pi has stored
-        // (opt-in only: coding-plan endpoints are quota-limited, so they
-        // never win autodetect silently).
-        if config.apiKey == "none" {
-            switch config.provider {
-            case "deepseek":     config.apiKey = piAuthApiKey("deepseek") ?? config.apiKey
-            case "zai":          config.apiKey = piAuthApiKey("zai") ?? config.apiKey
-            case "zai-coding":   config.apiKey = piAuthApiKey("zai") ?? config.apiKey
-            case "zai-coding-cn": config.apiKey = piAuthApiKey("zai-coding-cn") ?? config.apiKey
-            default: break
+            for name in Config.autodetectOrder {
+                guard let profile = Config.catalog[name], profile.key(in: env) != nil else { continue }
+                config = apply(profile, env)
+                break
             }
         }
 
@@ -205,7 +116,7 @@ struct Config: Sendable {
         // Optional integrations (nil when unset).
         config.typesafeApiKey = env["TYPESAFE_API_KEY"]
 
-        // 5. Explicit flags always win: --base-url/--api-key/--model.
+        // 5. Explicit flags always win: --base-url/--api-key/--model/--reasoning.
         var iterator = arguments.makeIterator()
         while let arg = iterator.next() {
             func value(_ flag: String, _ current: String?) -> String? {
@@ -221,53 +132,30 @@ struct Config: Sendable {
     }
 
     private static func apply(_ profile: ProviderProfile, _ env: [String: String]) -> Config {
-        Config(
+        var config = Config(
             provider: profile.name,
             baseURL: env["\(profile.name.uppercased())_BASE_URL"] ?? profile.baseURL,
             apiKey: profile.key(in: env) ?? "none",
             model: profile.defaultModel
         )
+        // Wire quirks travel with the profile — the client never string-matches.
+        config.tokenLimitKey = profile.tokenLimitField.rawValue
+        config.streamOptions = profile.sendsStreamOptions || config.baseURL.contains("11434")
+        return config
     }
 
-    /// API key stored by pi in ~/.pi/agent/auth.json for a provider, if
-    /// present. Only "api_key"-typed entries are used (OAuth tokens are not
-    /// plain API keys).
-    private static func piAuthApiKey(_ provider: String) -> String? {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".pi/agent/auth.json")
-        guard let data = try? Data(contentsOf: path),
-              let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
-              let entry = root.objectValue?[provider]?.objectValue else { return nil }
-        let type = entry["type"]?.stringValue ?? ""
-        let key = entry["key"]?.stringValue ?? ""
-        return type.lowercased() == "api_key" && !key.isEmpty ? key : nil
+    /// Key resolution for one profile: env keys first; then (when borrowing
+    /// is allowed) a pi-stored key from auth.json.
+    private static func resolvedKey(
+        profile: ProviderProfile, env: [String: String], allowBorrow: Bool, current: String
+    ) -> String {
+        if let envKey = profile.key(in: env) { return envKey }
+        guard allowBorrow else { return current }
+        return profile.borrowedKey() ?? current
     }
 
     private static func flagValue(_ flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
-    }
-
-    /// Look inside ~/.pi/agent/models.json for the default (non-orca) provider.
-    private struct PIProvider {
-        var baseURL: String
-        var apiKey: String
-        var model: String
-    }
-
-    private static func piProviderConfig() -> PIProvider? {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let path = home.appendingPathComponent(".pi/agent/models.json")
-        guard let data = try? Data(contentsOf: path) else { return nil }
-        guard let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
-              let providers = root.objectValue?["providers"]?.objectValue else { return nil }
-
-        // Pick the first provider whose id doesn't start with "orca".
-        let name = providers.keys.sorted().first { !$0.hasPrefix("orca") }
-        guard let name, let provider = providers[name]?.objectValue,
-              let base = provider["baseUrl"]?.stringValue else { return nil }
-        let key = provider["apiKey"]?.stringValue ?? "none"
-        let model = provider["models"]?.arrayValue?.first?.objectValue?["id"]?.stringValue ?? "default"
-        return PIProvider(baseURL: base, apiKey: key, model: model)
     }
 }

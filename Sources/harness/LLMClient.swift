@@ -178,13 +178,12 @@ struct OpenAICompatClient: ChatModel {
         // JSONValue object. A direct dictionary build would skip the Codable
         // path; the round-trip keeps the wire format defined in ONE place
         // (Message), so the session file and the API request can never drift.
-        // Provider quirk: newer OpenAI models (o-series, gpt-5+) reject
-        // "max_tokens" and require "max_completion_tokens"; everyone else
-        // expects "max_tokens". Small per-provider quirks like this are why
+        // Provider quirk (declared on the profile in Providers.swift):
+        // newer OpenAI models (o-series, gpt-5+) reject "max_tokens" and
+        // require "max_completion_tokens"; everyone else expects
+        // "max_tokens". Small per-provider quirks like this are why
         // harnesses keep a provider layer at all.
-        let maxTokensKey = config.baseURL.contains("api.openai.com")
-            ? "max_completion_tokens"
-            : "max_tokens"
+        let maxTokensKey = config.tokenLimitKey
         var body: [String: JSONValue] = [
             "model": .string(config.model),
             "messages": .array(messages.map { .parse(encode($0)) ?? .null }),
@@ -196,9 +195,9 @@ struct OpenAICompatClient: ChatModel {
         if streaming {
             body["stream"] = .bool(true)
             // stream_options lets the usage arrive in the final chunk. Only
-            // sent to Ollama-family endpoints — some OpenAI-compatible
+            // sent to profiles that declare support — some OpenAI-compatible
             // servers validate strictly and would reject the extra field.
-            if config.baseURL.contains("ollama") || config.baseURL.contains("11434") {
+            if config.streamOptions {
                 body["stream_options"] = .object(["include_usage": .bool(true)])
             }
         }

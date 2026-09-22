@@ -281,6 +281,15 @@ enum SelfTest {
                   && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: false),
               "")
 
+        // ---- provider quirks are data on the profile (modular config) ------
+        let openaiQuirks = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"])
+        check("openai quirk: max_completion_tokens",
+              openaiQuirks.tokenLimitKey == "max_completion_tokens", openaiQuirks.tokenLimitKey)
+        let cloudQuirks = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"])
+        check("ollama-cloud quirk: stream_options allowed", cloudQuirks.streamOptions, "")
+        let zaiQuirks = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"])
+        check("zai quirk: no stream_options by default", zaiQuirks.streamOptions == false, "")
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
