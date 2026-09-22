@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc  // usleep / kill / SIGKILL / SIGTERM / fflush on Linux
+#endif
 
 // ---------------------------------------------------------------------------
 // Tools.swift — the hands of the agent.
@@ -65,12 +68,20 @@ enum Tools {
     // routing, classification, severity — instead of generated text. The
     // request/response contract is in TypeSafe.swift; failures are text.
     // -----------------------------------------------------------------------
-    /// Spawn /bin/zsh -lc <cmd>, capture stdout+stderr, kill on timeout.
+    /// Spawn <shell> -lc <cmd>, capture stdout+stderr, kill on timeout.
     /// Async + detached so a long command never blocks the cooperative pool.
+    /// Shell choice is per-OS: zsh is the macOS default; zsh may not be
+    /// installed on Linux, and both understand `-lc`.
     static func runShell(command: String, cwd: String, timeout: Double) async -> String {
         await Task.detached {
+            #if os(Linux)
+            let shellPath = "/bin/bash"
+            #else
+            let shellPath = "/bin/zsh"
+            #endif
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.executableURL = URL(fileURLWithPath: shellPath)
+            process.arguments = ["-lc", command]
             process.arguments = ["-lc", command]
             process.currentDirectoryURL = URL(fileURLWithPath: cwd)
 

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc  // fflush on Linux
+#endif
 
 // ---------------------------------------------------------------------------
 // UI.swift — terminal rendering.

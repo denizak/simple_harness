@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking  // URLSession lives here on Linux
+#endif
 
 // ---------------------------------------------------------------------------
 // LLMClient.swift — talking to the model.
