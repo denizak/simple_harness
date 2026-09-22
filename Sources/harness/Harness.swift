@@ -74,6 +74,7 @@ struct HarnessMain {
                   --base-url URL    API endpoint override (OpenAI-compatible /chat/completions)
                   --api-key KEY     API key override
                   --once TASK       run a single task non-interactively, then exit
+                  --reasoning EFF   reasoning effort for thinking models (none|low|medium|high|max)
                   --selftest        exercise the tool layer without any API call
                   --e2e             stub-model loop tests + a live round-trip
                   --version         print the version and exit

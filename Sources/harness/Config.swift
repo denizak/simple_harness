@@ -12,7 +12,7 @@ import Foundation
 //   2. pi's ~/.pi/agent/models.json (reuse a provider this machine has)
 //   3. provider catalog via --provider flag
 //   4. environment variables (OPENAI_API_KEY / ZAI_API_KEY / HARNESS_*)
-//   5. command-line flags (--base-url/--api-key/--model)
+//   5. command-line flags (--base-url/--api-key/--model/--reasoning)
 //
 // Supported providers out of the box:
 //   ollama   local proxy (default; no key needed here)
@@ -48,6 +48,11 @@ struct Config: Sendable {
     var compactKeepTail: Int = 8
     /// Stream model responses (SSE) and print text as it arrives.
     var streaming: Bool = true
+    /// Optional reasoning effort for thinking models ("none", "low",
+    /// "medium", "high", "max") — sent as "reasoning_effort" when set.
+    /// Needed when a provider rejects function tools together with its own
+    /// reasoning default (e.g. gpt-5.6-luna via /v1/chat/completions).
+    var reasoningEffort: String?
     /// How deep spawn_agent may nest: 0 = top agent, so 2 allows
     /// top → sub → sub-sub. At the cap the tool disappears entirely.
     var maxAgentDepth: Int = 2
@@ -163,6 +168,9 @@ struct Config: Sendable {
            ["0", "false", "no", "off"].contains(value.lowercased()) {
             config.streaming = false
         }
+        if let value = env["HARNESS_REASONING"], !value.isEmpty {
+            config.reasoningEffort = value
+        }
         // Optional integrations (nil when unset).
         config.typesafeApiKey = env["TYPESAFE_API_KEY"]
 
@@ -176,6 +184,7 @@ struct Config: Sendable {
             config.model = value("--model", config.model) ?? config.model
             config.baseURL = value("--base-url", config.baseURL) ?? config.baseURL
             config.apiKey = value("--api-key", config.apiKey) ?? config.apiKey
+            config.reasoningEffort = value("--reasoning", config.reasoningEffort) ?? config.reasoningEffort
         }
         return config
     }

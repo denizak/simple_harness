@@ -236,6 +236,33 @@ enum SelfTest {
               rendered.contains("95%") && rendered.contains("billing") && rendered.contains("0.81"),
               rendered.replacingOccurrences(of: "\n", with: " | "))
 
+        // ---- reasoning_effort: provider quirk handling (pure) ---------------
+        // Request building is pure, so the body can be inspected directly.
+        let quirky = OpenAICompatClient(config: Config(
+            provider: "quirky", baseURL: "https://example.com/v1", apiKey: "none", model: "gpt-5.6-luna"))
+        do {
+            let (plainBody, _) = try quirky.requestFor(
+                messages: [.user("hi")], tools: [Tools.grep], streaming: false)
+            check("reasoning_effort absent by default", plainBody["reasoning_effort"] == nil, "")
+            let (overriddenBody, _) = try quirky.requestFor(
+                messages: [.user("hi")], tools: [], streaming: false,
+                overrides: ["reasoning_effort": .string("none")])
+            check("reasoning_effort override lands in body",
+                  overriddenBody["reasoning_effort"] == .string("none"), "")
+        } catch {
+            check("reasoning_effort request builds", false, "\(error)")
+        }
+        check("config-driven reasoning effort",
+              Config.resolve(arguments: ["--reasoning", "high"], env: [:]).reasoningEffort == "high", "")
+        let conflict = LLMError(status: 400, body:
+            "Function tools with reasoning_effort are not supported for gpt-5.6-luna.")
+        check("conflict detected for the self-healing retry",
+              OpenAICompatClient.isReasoningToolConflict(conflict)
+                  && OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: true)
+                  && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 1, sentEffort: true)
+                  && !OpenAICompatClient.shouldRetryWithNone(conflict, attempt: 0, sentEffort: false),
+              "")
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }

@@ -94,25 +94,35 @@ struct OpenAICompatClient: ChatModel {
     }
 
     func complete(_ messages: [Message], tools: [ToolSpec]) async throws -> AssistantTurn {
-        let (_, request) = try requestFor(messages: messages, tools: tools, streaming: false)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else {
-            throw LLMError(status: status, body: String(data: data, encoding: .utf8) ?? "<binary>")
-        }
+        var (body, request) = try requestFor(messages: messages, tools: tools, streaming: false)
+        for attempt in 0..<2 {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(status) else {
+                let error = LLMError(status: status, body: String(data: data, encoding: .utf8) ?? "<binary>")
+                if Self.shouldRetryWithNone(error, attempt: attempt, sentEffort: body["reasoning_effort"] == nil) {
+                    print(AgentUI.dim("  ↯ tools+reasoning rejected — retrying with reasoning_effort=none"))
+                    (body, request) = try requestFor(messages: messages, tools: tools, streaming: false,
+                                                     overrides: ["reasoning_effort": .string("none")])
+                    continue
+                }
+                throw error
+            }
 
-        // ---- 3. Decode one choice into an AssistantTurn --------------------
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        guard let choice = decoded.choices.first else {
-            throw LLMError(status: status, body: "Response contained no choices: \(data.prefix(300))")
+            // Decode one choice into an AssistantTurn.
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            guard let choice = decoded.choices.first else {
+                throw LLMError(status: status, body: "Response contained no choices: \(data.prefix(300))")
+            }
+            let usage = decoded.usage.map { Usage(promptTokens: $0.promptTokens, completionTokens: $0.completionTokens) }
+            return AssistantTurn(
+                text: choice.message.content ?? "",
+                toolCalls: choice.message.toolCalls ?? [],
+                finishReason: choice.finishReason ?? "unknown",
+                usage: usage
+            )
         }
-        let usage = decoded.usage.map { Usage(promptTokens: $0.promptTokens, completionTokens: $0.completionTokens) }
-        return AssistantTurn(
-            text: choice.message.content ?? "",
-            toolCalls: choice.message.toolCalls ?? [],
-            finishReason: choice.finishReason ?? "unknown",
-            usage: usage
-        )
+        throw LLMError(status: 0, body: "retry loop exhausted")
     }
 
     /// The streaming path: same request with "stream": true, but the response
@@ -127,30 +137,41 @@ struct OpenAICompatClient: ChatModel {
         tools: [ToolSpec],
         onText: @Sendable (String) -> Void
     ) async throws -> AssistantTurn {
-        let (_, request) = try requestFor(messages: messages, tools: tools, streaming: true)
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else {
-            var body = ""
-            for try await byte in bytes.prefix(2_000) { body.append(Character(UnicodeScalar(byte))) }
-            throw LLMError(status: status, body: body)
-        }
+        var (body, request) = try requestFor(messages: messages, tools: tools, streaming: true)
+        for attempt in 0..<2 {
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(status) else {
+                var errorBody = ""
+                for try await byte in bytes.prefix(2_000) { errorBody.append(Character(UnicodeScalar(byte))) }
+                let error = LLMError(status: status, body: errorBody)
+                if Self.shouldRetryWithNone(error, attempt: attempt, sentEffort: body["reasoning_effort"] == nil) {
+                    print(AgentUI.dim("  ↯ tools+reasoning rejected — retrying with reasoning_effort=none"))
+                    (body, request) = try requestFor(messages: messages, tools: tools, streaming: true,
+                                                     overrides: ["reasoning_effort": .string("none")])
+                    continue
+                }
+                throw error
+            }
 
-        var assembler = SSEAssembler()
-        for try await line in bytes.lines {
-            guard line.hasPrefix("data:") else { continue }  // ignore comments/blanks
-            let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-            if payload == "[DONE]" { break }
-            guard let chunk = JSONValue.parse(payload) else { continue }
-            let fragment = assembler.ingest(chunk)
-            if !fragment.isEmpty { onText(fragment) }
+            var assembler = SSEAssembler()
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data:") else { continue }  // ignore comments/blanks
+                let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                if payload == "[DONE]" { break }
+                guard let chunk = JSONValue.parse(payload) else { continue }
+                let fragment = assembler.ingest(chunk)
+                if !fragment.isEmpty { onText(fragment) }
+            }
+            return assembler.assembled()
         }
-        return assembler.assembled()
+        throw LLMError(status: 0, body: "retry loop exhausted")
     }
 
     /// Shared request construction for both paths.
-    private func requestFor(
-        messages: [Message], tools: [ToolSpec], streaming: Bool
+    func requestFor(
+        messages: [Message], tools: [ToolSpec], streaming: Bool,
+        overrides: [String: JSONValue] = [:]
     ) throws -> ([String: JSONValue], URLRequest) {
         // The Message structs already Codable-encode to exact wire format, so
         // here each message is serialized and re-parsed into a dynamic
@@ -169,6 +190,9 @@ struct OpenAICompatClient: ChatModel {
             "messages": .array(messages.map { .parse(encode($0)) ?? .null }),
             maxTokensKey: .number(Double(config.maxTokens)),
         ]
+        // Reasoning effort: only sent when explicitly configured.
+        if let effort = config.reasoningEffort { body["reasoning_effort"] = .string(effort) }
+        for (key, value) in overrides { body[key] = value }
         if streaming {
             body["stream"] = .bool(true)
             // stream_options lets the usage arrive in the final chunk. Only
@@ -300,5 +324,22 @@ struct SSEAssembler {
             return call
         }
         return AssistantTurn(text: text, toolCalls: ordered, finishReason: finishReason ?? "stop", usage: usage)
+    }
+}
+
+extension OpenAICompatClient {
+    /// True when a 400 error body names reasoning_effort — the provider's own
+    /// remedy (retry with reasoning_effort "none") applies. Seen on
+    /// gpt-5.6-luna: "Function tools with reasoning_effort are not supported
+    /// in /v1/chat/completions … set reasoning_effort to 'none'".
+    static func isReasoningToolConflict(_ error: LLMError) -> Bool {
+        error.status == 400 && error.body.contains("reasoning_effort")
+    }
+
+    /// Guard for the one-shot self-healing retry.
+    static func shouldRetryWithNone(
+        _ error: LLMError, attempt: Int, sentEffort: Bool
+    ) -> Bool {
+        attempt == 0 && sentEffort && isReasoningToolConflict(error)
     }
 }

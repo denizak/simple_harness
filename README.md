@@ -115,8 +115,15 @@ raw tags from `https://ollama.com/api/tags` (e.g. `kimi-k2.7-code`); the
 `:cloud` suffix is only for a signed-in local server. `tool_choice` is not
 supported by the cloud API — the harness never sends it anyway.
 
-Provider quirks live in one place (`LLMClient.swift`): e.g. newer OpenAI models
-require `max_completion_tokens` instead of `max_tokens`.
+Provider quirks live in one place (`LLMClient.swift`):
+- newer OpenAI models require `max_completion_tokens` instead of `max_tokens`;
+- `stream_options` only goes to Ollama-family endpoints (some gateways
+  validate strictly);
+- **tools + reasoning conflicts self-heal**: when a provider answers 400 with
+  "reasoning_effort is not supported … set reasoning_effort to 'none'"
+  (seen on gpt-5.6-luna), the client retries once with `reasoning_effort:
+  "none"` — the server's own remedy. Set your own level with
+  `HARNESS_REASONING=high` or `--reasoning EFFORT`.
 
 ## Testing
 
