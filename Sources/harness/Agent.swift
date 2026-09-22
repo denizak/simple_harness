@@ -45,10 +45,20 @@ struct Agent {
             // (see Compaction.swift). No-op for short sessions.
             await Compaction.compactIfNeeded(&messages, config: config, model: model)
 
-            // ---- 1. Ask the model for its next move -------------------------
+            // ---- 1. Ask the model for its next move (streamed when on) ------
+            // With streaming, visible text is printed fragment-by-fragment as
+            // it arrives; the assembled turn comes back exactly like the
+            // one-shot path, so everything below is unchanged.
             let turn: AssistantTurn
             do {
-                turn = try await model.complete(messages, tools: Tools.all)
+                if config.streaming {
+                    turn = try await model.stream(messages, tools: Tools.all) { fragment in
+                        AgentUI.printStreaming(fragment)
+                    }
+                    if !turn.text.isEmpty { print() }  // close the streamed line
+                } else {
+                    turn = try await model.complete(messages, tools: Tools.all)
+                }
             } catch let error as LLMError {
                 // Surface API errors with context; keep the history intact so
                 // the user can /retry or /save.
@@ -73,11 +83,13 @@ struct Agent {
 
             // ---- 3. Plain text → task complete, back to the user ------------
             guard turn.wantsTools else {
-                if !turn.text.isEmpty {
-                    print(AgentUI.assistant(turn.text))
-                } else {
+                if turn.text.isEmpty {
                     print(AgentUI.warn("(model returned no text)"))
+                } else if !config.streaming {
+                    // Non-streaming path: the text hasn't been shown yet.
+                    print(AgentUI.assistant(turn.text))
                 }
+                // (streaming path: text is already on screen above)
                 return
             }
 

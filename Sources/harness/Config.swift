@@ -46,6 +46,8 @@ struct Config: Sendable {
     var compactAboveBytes: Int = 100_000
     /// How many recent messages to always keep verbatim when compacting.
     var compactKeepTail: Int = 8
+    /// Stream model responses (SSE) and print text as it arrives.
+    var streaming: Bool = true
 
     /// The well-known provider catalog. All of these speak the OpenAI
     /// Chat Completions dialect, so one client covers them all.
@@ -133,6 +135,10 @@ struct Config: Sendable {
         }
         if let value = env["HARNESS_COMPACT_KEEP_TAIL"], let parsed = Int(value) {
             config.compactKeepTail = max(2, parsed)  // tail must stay splittable
+        }
+        if let value = env["HARNESS_STREAMING"],
+           ["0", "false", "no", "off"].contains(value.lowercased()) {
+            config.streaming = false
         }
 
         // 5. Explicit flags always win: --base-url/--api-key/--model.

@@ -171,6 +171,36 @@ enum SelfTest {
               noKeys.provider != "ollama-cloud" && noKeys.provider != "zai" && noKeys.provider != "openai",
               "provider=\(noKeys.provider)")
 
+        // ---- SSE assembler: delta stitching without any network -------------
+        // These are the four shapes a streaming provider sends: text deltas,
+        // tool_call fragments (name first, arguments appended across chunks),
+        // the finish chunk, and a usage-only final chunk.
+        var assembler = SSEAssembler()
+        // Raw strings let the JSON keep its plain quotes; the \" sequences
+        // inside "arguments" are the JSON-escaped quotes the fragment needs.
+        let sseChunks = [
+            #"{"choices":[{"delta":{"content":"Hel"}}]}"#,
+            #"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"ba","arguments":"{\"cmd\":"}}]}}]}"#,
+            #"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"ls\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+            #"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        ]
+        for chunk in sseChunks {
+            guard let parsed = JSONValue.parse(chunk) else {
+                check("SSE: chunk parses", false, chunk)
+                continue
+            }
+            _ = assembler.ingest(parsed)
+        }
+        let assembled = assembler.assembled()
+        check("SSE: text assembled from fragments", assembled.text == "Hel", assembled.text)
+        check("SSE: tool_call assembled from deltas",
+              assembled.toolCalls.count == 1 && assembled.toolCalls[0].function.name == "ba"
+                  && assembled.toolCalls[0].function.arguments == "{\"cmd\":\"ls\"}"
+                  && assembled.toolCalls[0].id == "c1",
+              assembled.toolCalls.first.map { "\($0.function.name) \($0.function.arguments)" } ?? "none")
+        check("SSE: finish reason + usage captured",
+              assembled.finishReason == "tool_calls" && assembled.usage?.promptTokens == 10, "")
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }

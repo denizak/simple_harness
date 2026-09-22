@@ -25,6 +25,12 @@ enum AgentUI {
     static func errorText(_ text: String) -> String { "\(Self.red)\(text)\(reset)" }
     static func assistant(_ text: String) -> String { "\(Self.green)\(text)\(reset)" }
 
+    /// Streaming fragment: green, no newline — the caller flushes explicitly.
+    static func printStreaming(_ fragment: String) {
+        print("\(Self.green)\(fragment)\(reset)", terminator: "")
+        fflush(stdout)
+    }
+
     /// "→ bash {\"command\": \"ls\"}" header above each tool execution.
     static func toolCall(_ call: ToolCall) -> String {
         var arguments = call.function.arguments

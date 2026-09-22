@@ -138,6 +138,13 @@ the only question the stub can't: does the request satisfy the real server?
 - **Tools report errors as text, not throws.** A failed `edit_file` comes back
   as "old_text appears 3 times…" so the model can read it and adapt. Only
   *infrastructure* failures (API down, turn cap) throw up to the REPL.
+- **Streaming (SSE).** The loop requests `"stream": true` and prints visible
+  text as it arrives; the response is a stream of `data: {chunk}` lines ending
+  with `data: [DONE]`. The hard part is that **tool_calls arrive as delta
+  fragments keyed by `index`** — the first carries id + name, later ones append
+  to `arguments` — which `SSEAssembler` stitches back into a full turn. That
+  assembler is a pure struct, so `--selftest` unit-tests it with canned chunks.
+  Disable with `HARNESS_STREAMING=0`.
 - **Turn cap + output truncation.** `maxTurns` (25) stops runaway loops;
   tool output is truncated (20k chars) before it enters context — a 50 MB build
   log is not context, it's a bill.
