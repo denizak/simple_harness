@@ -12,7 +12,7 @@ import Foundation
 // LangChain, and Claude Code all have an equivalent.
 // ---------------------------------------------------------------------------
 
-indirect enum JSONValue: Codable, Sendable, Equatable {
+public indirect enum JSONValue: Codable, Sendable, Equatable {
     case null
     case bool(Bool)
     case number(Double)
@@ -21,25 +21,25 @@ indirect enum JSONValue: Codable, Sendable, Equatable {
     case object([String: JSONValue])
 
     /// Convenience accessors for reading tool arguments.
-    var stringValue: String? { if case .string(let string) = self { return string }; return nil }
-    var intValue: Int? {
+    public var stringValue: String? { if case .string(let string) = self { return string }; return nil }
+    public var intValue: Int? {
         if case .number(let number) = self, number == number.rounded(), abs(number) < 1e15 {
             return Int(number)
         }
         return nil
     }
-    var boolValue: Bool? { if case .bool(let bool) = self { return bool }; return nil }
-    var doubleValue: Double? { if case .number(let number) = self { return number }; return nil }
-    var objectValue: [String: JSONValue]? { if case .object(let object) = self { return object }; return nil }
-    var arrayValue: [JSONValue]? { if case .array(let array) = self { return array }; return nil }
+    public var boolValue: Bool? { if case .bool(let bool) = self { return bool }; return nil }
+    public var doubleValue: Double? { if case .number(let number) = self { return number }; return nil }
+    public var objectValue: [String: JSONValue]? { if case .object(let object) = self { return object }; return nil }
+    public var arrayValue: [JSONValue]? { if case .array(let array) = self { return array }; return nil }
 
-    func string(forKey key: String) -> String? { objectValue?[key]?.stringValue }
-    func int(forKey key: String) -> Int? { objectValue?[key]?.intValue }
-    func bool(forKey key: String) -> Bool? { objectValue?[key]?.boolValue }
+    public func string(forKey key: String) -> String? { objectValue?[key]?.stringValue }
+    public func int(forKey key: String) -> Int? { objectValue?[key]?.intValue }
+    public func bool(forKey key: String) -> Bool? { objectValue?[key]?.boolValue }
 
     // MARK: Codable — delegates to JSONSerialization-free manual mapping.
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null }
         else if let boolean = try? container.decode(Bool.self) { self = .bool(boolean) }
@@ -55,7 +55,7 @@ indirect enum JSONValue: Codable, Sendable, Equatable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .null: try container.encodeNil()
@@ -68,7 +68,7 @@ indirect enum JSONValue: Codable, Sendable, Equatable {
     }
 
     /// Build from a JSON string (used to parse model-generated tool arguments).
-    static func parse(_ text: String) -> JSONValue? {
+    public static func parse(_ text: String) -> JSONValue? {
         guard let data = text.data(using: .utf8) else { return nil }
         // JSONSerialization gives ObjC types (NSDictionary/NSArray/NSNumber);
         // Codable expects Swift types. Bridge by round-tripping through a

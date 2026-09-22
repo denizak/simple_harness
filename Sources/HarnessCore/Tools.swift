@@ -23,16 +23,16 @@ import Glibc  // usleep / kill / SIGKILL / SIGTERM / fflush on Linux
 // thrown — the model should see the failure and retry intelligently.
 // ---------------------------------------------------------------------------
 
-enum Tools {
-    static let all: [ToolSpec] = [bash, grep, readFile, writeFile, editFile, spawnAgent, TypeSafeJudge.tool]
+public enum Tools {
+    public static let all: [ToolSpec] = [bash, grep, readFile, writeFile, editFile, spawnAgent, TypeSafeJudge.tool]
 
     /// Look up a tool by name; nil if the model invented one.
-    static func named(_ name: String) -> ToolSpec? { all.first { $0.name == name } }
+    public static func named(_ name: String) -> ToolSpec? { all.first { $0.name == name } }
 
     // -----------------------------------------------------------------------
     // bash
     // -----------------------------------------------------------------------
-    static let bash = ToolSpec(
+    public static let bash = ToolSpec(
         name: "bash",
         description: "Run a shell command (zsh). Use for listing files, running builds/tests, git, etc. " +
                      "Working directory is the harness cwd. Output is truncated. " +
@@ -72,7 +72,7 @@ enum Tools {
     /// Async + detached so a long command never blocks the cooperative pool.
     /// Shell choice is per-OS: zsh is the macOS default; zsh may not be
     /// installed on Linux, and both understand `-lc`.
-    static func runShell(command: String, cwd: String, timeout: Double) async -> String {
+    public static func runShell(command: String, cwd: String, timeout: Double) async -> String {
         await Task.detached {
             #if os(Linux)
             let shellPath = "/bin/bash"
@@ -145,7 +145,7 @@ enum Tools {
     /// Files larger than this are presumed binary/huge and skipped.
     private static let grepMaxFileBytes = 1_000_000
 
-    static let grep = ToolSpec(
+    public static let grep = ToolSpec(
         name: "grep",
         description: "Search file contents with a regular expression (ICU syntax, case-sensitive like " +
                      "real grep). Searches one file or recursively from a directory; matches come back " +
@@ -248,7 +248,7 @@ enum Tools {
     // -----------------------------------------------------------------------
     // read_file
     // -----------------------------------------------------------------------
-    static let readFile = ToolSpec(
+    public static let readFile = ToolSpec(
         name: "read_file",
         description: "Read a text file. Returns numbered lines. Use offset/limit for large files " +
                      "(default: first 2000 lines).",
@@ -299,7 +299,7 @@ enum Tools {
     // -----------------------------------------------------------------------
     // write_file
     // -----------------------------------------------------------------------
-    static let writeFile = ToolSpec(
+    public static let writeFile = ToolSpec(
         name: "write_file",
         description: "Create or overwrite a file with the given content. " +
                      "Parent directories are created if missing.",
@@ -329,7 +329,7 @@ enum Tools {
     // -----------------------------------------------------------------------
     // edit_file
     // -----------------------------------------------------------------------
-    static let editFile = ToolSpec(
+    public static let editFile = ToolSpec(
         name: "edit_file",
         description: "Replace an exact string in a file. old_text must match exactly and be unique in the " +
                      "file (set replace_all=true to replace every occurrence). If it is not found or " +
@@ -388,7 +388,7 @@ enum Tools {
     //   * depth cap (config.maxAgentDepth) so recursion terminates
     //   * failures are TEXT — the parent reads the failure and adapts
     // -----------------------------------------------------------------------
-    static let spawnAgent = ToolSpec(
+    public static let spawnAgent = ToolSpec(
         name: "spawn_agent",
         description: "Delegate a focused, self-contained subtask to a fresh sub-agent. " +
                      "It runs with the same provider, tools and working directory but an empty " +

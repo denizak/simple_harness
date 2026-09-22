@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 // ---------------------------------------------------------------------------
 // Selftest.swift — verify the tool layer without an API call.

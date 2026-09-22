@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 // ---------------------------------------------------------------------------
 // E2ETest.swift — LIVE verification legs only (network + real APIs).

@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import harness
+@testable import HarnessCore
 
 // ---------------------------------------------------------------------------
 // HarnessTests.swift — the swift-testing suite (`swift test`).
@@ -10,7 +10,7 @@ import Foundation
 //     stale-binary trap (a failed build previously left an old test binary
 //     "passing").
 //   * `#expect` records failures with file/line, vs. hand-rolled ✓/✗.
-//   * `@testable import harness` reaches the executable's internals — fine
+//   * `@testable import HarnessCore` reaches the executable's internals — fine
 //     for a single-module project; a library split is the next growth step.
 //
 // Live provider tests stay behind `harness --e2e` (they cost real quota and
@@ -296,31 +296,24 @@ struct SSEAssemblerTests {
 
 @Suite("/load precedence")
 struct LoadPrecedenceTests {
-    @Test("endpoint mismatch keeps the launch model; conversation loads")
-    func mismatchKeepsLaunchModel() async throws {
-        let dir = NSTemporaryDirectory() + "harness-loadtest-\(UUID().uuidString)/"
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: dir) }
-        let sessionPath = dir + "session.json"
-
-        let launchConfig = Config(
-            provider: "stub", baseURL: "https://launch.example.com/v1", apiKey: "none", model: "launch-model")
-        var agent = Agent(config: launchConfig, model: OpenAICompatClient(config: launchConfig))
-        var messages: [Message] = [.system("sys")]
-
+    @Test("endpoint mismatch keeps the active model")
+    func mismatchKeepsActive() {
         let elsewhere = Session(model: "some-other-model", provider: "somewhere-else",
                                 baseURL: "https://other.example.com/v1", messages: [.user("hi")])
-        try elsewhere.save(to: URL(fileURLWithPath: sessionPath))
-        await HarnessMain.handleCommand("/load \(sessionPath)", &agent, &messages)
-        #expect(agent.config.model == "launch-model")
-        #expect(messages.contains { $0.role == "user" && $0.content == "hi" })
+        #expect(elsewhere.restoreModel(activeBaseURL: "https://launch.example.com/v1") == nil)
+    }
 
-        // Same endpoint → the session model IS restored.
-        let sameEndpoint = Session(model: "same-model", provider: "stub",
-                                   baseURL: "https://launch.example.com/v1", messages: [.user("hi")])
-        try sameEndpoint.save(to: URL(fileURLWithPath: sessionPath))
-        await HarnessMain.handleCommand("/load \(sessionPath)", &agent, &messages)
-        #expect(agent.config.model == "same-model")
+    @Test("endpoint match restores the session model")
+    func matchRestoresSession() {
+        let same = Session(model: "same-model", provider: "stub",
+                           baseURL: "https://launch.example.com/v1", messages: [.user("hi")])
+        #expect(same.restoreModel(activeBaseURL: "https://launch.example.com/v1") == "same-model")
+    }
+
+    @Test("old session files without an endpoint record restore the model")
+    func legacyRestores() {
+        let legacy = Session(model: "legacy-model", provider: "old", baseURL: nil, messages: [.user("hi")])
+        #expect(legacy.restoreModel(activeBaseURL: "https://anything.example.com/v1") == "legacy-model")
     }
 }
 

@@ -19,7 +19,7 @@ import FoundationNetworking  // URLSession lives here on Linux
 // Anthropic-shaped internal format. Different skin, same idea.)
 // ---------------------------------------------------------------------------
 
-protocol ChatModel: Sendable {
+public protocol ChatModel: Sendable {
     /// One-shot completion (no streaming) — used by compaction's summarizer,
     /// where incremental display adds nothing.
     func complete(_ messages: [Message], tools: [ToolSpec]) async throws -> AssistantTurn
@@ -35,12 +35,12 @@ protocol ChatModel: Sendable {
     ) async throws -> AssistantTurn
 }
 
-extension ChatModel {
+public extension ChatModel {
     /// Default streaming: fall back to one-shot and emit the text in one
     /// piece. Conformers get streaming for free; override it only when the
     /// provider actually supports SSE. (The stub model in the e2e suite uses
     /// exactly this fallback.)
-    func stream(
+    public func stream(
         _ messages: [Message],
         tools: [ToolSpec],
         onText: @Sendable (String) -> Void
@@ -51,14 +51,23 @@ extension ChatModel {
     }
 }
 
-struct LLMError: Error, CustomStringConvertible {
-    let status: Int
-    let body: String
-    var description: String { "API error (HTTP \(status)): \(body.prefix(500))" }
+public struct LLMError: Error, CustomStringConvertible {
+    public let status: Int
+    public let body: String
+    public var description: String { "API error (HTTP \(status)): \(body.prefix(500))" }
+
+    public init(status: Int, body: String) {
+        self.status = status
+        self.body = body
+    }
 }
 
-struct OpenAICompatClient: ChatModel {
-    var config: Config
+public struct OpenAICompatClient: ChatModel {
+    public var config: Config
+
+    public init(config: Config) {
+        self.config = config
+    }
 
     private struct Choice: Codable {
         // Mirror the wire format with camelCase names and map to snake_case
@@ -96,7 +105,7 @@ struct OpenAICompatClient: ChatModel {
         }
     }
 
-    func complete(_ messages: [Message], tools: [ToolSpec]) async throws -> AssistantTurn {
+    public func complete(_ messages: [Message], tools: [ToolSpec]) async throws -> AssistantTurn {
         var (body, request) = try requestFor(messages: messages, tools: tools, streaming: false)
         for attempt in 0..<2 {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -135,7 +144,7 @@ struct OpenAICompatClient: ChatModel {
     ///   2. tool_calls arrive as delta fragments keyed by `index`: the first
     ///      fragment carries the id + function name, later fragments append
     ///      to `arguments`. The assembler below stitches them back together.
-    func stream(
+    public func stream(
         _ messages: [Message],
         tools: [ToolSpec],
         onText: @Sendable (String) -> Void
@@ -172,7 +181,7 @@ struct OpenAICompatClient: ChatModel {
     }
 
     /// Shared request construction for both paths.
-    func requestFor(
+    public func requestFor(
         messages: [Message], tools: [ToolSpec], streaming: Bool,
         overrides: [String: JSONValue] = [:]
     ) throws -> ([String: JSONValue], URLRequest) {
@@ -234,7 +243,7 @@ struct OpenAICompatClient: ChatModel {
     /// GET {baseURL}/models — the OpenAI-compatible model listing. Works on
     /// Ollama Cloud (lists cloud models), and on local servers that implement
     /// the endpoint. Used by the /models REPL command.
-    func listModels() async throws -> [String] {
+    public func listModels() async throws -> [String] {
         var request = URLRequest(url: URL(string: config.baseURL + "/models")!)
         request.timeoutInterval = 60
         if config.apiKey != "none" {
@@ -277,7 +286,9 @@ struct OpenAICompatClient: ChatModel {
 // This is a pure struct so --selftest can unit-test it with canned chunks,
 // no network needed.
 // ---------------------------------------------------------------------------
-struct SSEAssembler {
+public struct SSEAssembler {
+    public init() {}
+
     private(set) var text = ""
     private var calls: [Int: ToolCall] = [:]
     private(set) var finishReason: String?
@@ -285,7 +296,7 @@ struct SSEAssembler {
 
     /// Ingest one `data:` payload; returns the visible text fragment (may be
     /// empty — tool_call deltas carry no displayable text).
-    mutating func ingest(_ chunk: JSONValue) -> String {
+    public mutating func ingest(_ chunk: JSONValue) -> String {
         guard let obj = chunk.objectValue else { return "" }
         if let usageObj = obj["usage"]?.objectValue,
            let prompt = usageObj["prompt_tokens"]?.intValue,
@@ -319,7 +330,7 @@ struct SSEAssembler {
         return fragment
     }
 
-    func assembled() -> AssistantTurn {
+    public func assembled() -> AssistantTurn {
         let ordered = calls.sorted { $0.key < $1.key }.map { index, call in
             var call = call
             if call.id.isEmpty { call.id = "call_\(index)" }  // id never arrived
@@ -329,17 +340,17 @@ struct SSEAssembler {
     }
 }
 
-extension OpenAICompatClient {
+public extension OpenAICompatClient {
     /// True when a 400 error body names reasoning_effort — the provider's own
     /// remedy (retry with reasoning_effort "none") applies. Seen on
     /// gpt-5.6-luna: "Function tools with reasoning_effort are not supported
     /// in /v1/chat/completions … set reasoning_effort to 'none'".
-    static func isReasoningToolConflict(_ error: LLMError) -> Bool {
+    public static func isReasoningToolConflict(_ error: LLMError) -> Bool {
         error.status == 400 && error.body.contains("reasoning_effort")
     }
 
     /// Guard for the one-shot self-healing retry.
-    static func shouldRetryWithNone(
+    public static func shouldRetryWithNone(
         _ error: LLMError, attempt: Int, sentEffort: Bool
     ) -> Bool {
         attempt == 0 && sentEffort && isReasoningToolConflict(error)

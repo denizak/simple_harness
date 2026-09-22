@@ -20,50 +20,87 @@ import Foundation
 // switches, no string matching in the client.
 // ---------------------------------------------------------------------------
 
-struct Config: Sendable {
-    var provider: String
-    var baseURL: String
-    var apiKey: String
-    var model: String
-    var maxTokens: Int = 4096
+public struct Config: Sendable {
+    public var provider: String
+    public var baseURL: String
+    public var apiKey: String
+    public var model: String
+    public var maxTokens: Int = 4096
     /// Hard cap on model turns per user task (loop safety belt).
-    var maxTurns: Int = 25
+    public var maxTurns: Int = 25
     /// Truncation limit for tool output fed back to the model (chars).
-    var maxToolOutput: Int = 20_000
+    public var maxToolOutput: Int = 20_000
     /// Compact the history when its byte estimate exceeds this (0 = never).
     /// ~4 bytes ≈ 1 token, so 100_000 ≈ 25k tokens of headroom spent.
-    var compactAboveBytes: Int = 100_000
+    public var compactAboveBytes: Int = 100_000
     /// How many recent messages to always keep verbatim when compacting.
-    var compactKeepTail: Int = 8
+    public var compactKeepTail: Int = 8
     /// Stream model responses (SSE) and print text as it arrives.
-    var streaming: Bool = true
+    public var streaming: Bool = true
     /// Optional reasoning effort for thinking models ("none", "low",
     /// "medium", "high", "max") — sent as "reasoning_effort" when set.
     /// Needed when a provider rejects function tools together with its own
     /// reasoning default (e.g. gpt-5.6-luna via /v1/chat/completions).
-    var reasoningEffort: String?
+    public var reasoningEffort: String?
     /// How deep spawn_agent may nest: 0 = top agent, so 2 allows
     /// top → sub → sub-sub. At the cap the tool disappears entirely.
-    var maxAgentDepth: Int = 2
+    public var maxAgentDepth: Int = 2
     /// TypeSafe API key (https://docs.typesafe.ai) — powers the `judge` tool.
     /// Read from the environment; optional — the tool reports its absence.
-    var typesafeApiKey: String?
+    public var typesafeApiKey: String?
     /// Wire-format quirk resolved from the provider profile: which
     /// token-limit field the server accepts ("max_tokens" or, for newer
     /// OpenAI models, "max_completion_tokens").
-    var tokenLimitKey: String = "max_tokens"
+    public var tokenLimitKey: String = "max_tokens"
     /// Wire-format quirk resolved from the provider profile: may the client
     /// send stream_options.include_usage while streaming? (Ollama-family
     /// servers accept it; some gateways validate strictly and reject it.)
-    var streamOptions: Bool = false
+    public var streamOptions: Bool = false
 
-    static func resolve(arguments: [String]) -> Config {
+
+    /// Explicit init mirroring the memberwise one with defaults — cross-module
+    /// construction (the thin executable, tests) needs public access.
+    public init(
+        provider: String,
+        baseURL: String,
+        apiKey: String,
+        model: String,
+        maxTokens: Int = 4096,
+        maxTurns: Int = 25,
+        maxToolOutput: Int = 20_000,
+        compactAboveBytes: Int = 100_000,
+        compactKeepTail: Int = 8,
+        streaming: Bool = true,
+        reasoningEffort: String? = nil,
+        maxAgentDepth: Int = 2,
+        typesafeApiKey: String? = nil,
+        tokenLimitKey: String = "max_tokens",
+        streamOptions: Bool = false
+    ) {
+        self.provider = provider
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.model = model
+        self.maxTokens = maxTokens
+        self.maxTurns = maxTurns
+        self.maxToolOutput = maxToolOutput
+        self.compactAboveBytes = compactAboveBytes
+        self.compactKeepTail = compactKeepTail
+        self.streaming = streaming
+        self.reasoningEffort = reasoningEffort
+        self.maxAgentDepth = maxAgentDepth
+        self.typesafeApiKey = typesafeApiKey
+        self.tokenLimitKey = tokenLimitKey
+        self.streamOptions = streamOptions
+    }
+
+    public static func resolve(arguments: [String]) -> Config {
         resolve(arguments: arguments, env: ProcessInfo.processInfo.environment)
     }
 
     /// Injectable-environment variant so the selftest can verify provider
     /// selection without touching real secrets.
-    static func resolve(arguments: [String], env: [String: String]) -> Config {
+    public static func resolve(arguments: [String], env: [String: String]) -> Config {
         var config = Config(
             provider: "ollama",
             baseURL: "http://127.0.0.1:11434/v1",

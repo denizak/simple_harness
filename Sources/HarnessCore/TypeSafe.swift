@@ -21,22 +21,29 @@ import FoundationNetworking  // URLSession lives here on Linux
 // ---------------------------------------------------------------------------
 
 /// One typed question, normalized from tool arguments.
-struct TypeSafeQuestion: Sendable {
-    var id: String
+public struct TypeSafeQuestion: Sendable {
+    public var id: String
     /// "noul" (yes/no) | "choice" (pick one) | "score" (rate on levels)
-    var type: String
-    var instructions: String
+    public var type: String
+    public var instructions: String
     /// noul → {"true": …, "false": …} · choice → {option: description} · score → [levels]
-    var criteria: JSONValue?
+    public var criteria: JSONValue?
+
+    public init(id: String, type: String, instructions: String, criteria: JSONValue? = nil) {
+        self.id = id
+        self.type = type
+        self.instructions = instructions
+        self.criteria = criteria
+    }
 }
 
-enum TypeSafeClient {
-    static let endpoint = "https://api.typesafe.ai/v1/systemone"
-    static let model = "jev-latest"
+public enum TypeSafeClient {
+    public static let endpoint = "https://api.typesafe.ai/v1/systemone"
+    public static let model = "jev-latest"
 
     /// Pure helper — builds the request body from tool arguments. Unit-tested
     /// in --selftest (no network, no key needed).
-    static func request(state: String, questions: [TypeSafeQuestion]) -> JSONValue {
+    public static func request(state: String, questions: [TypeSafeQuestion]) -> JSONValue {
         var questionMap: [String: JSONValue] = [:]
         for question in questions {
             var entry: [String: JSONValue] = [
@@ -55,7 +62,7 @@ enum TypeSafeClient {
 
     /// POST the evaluation. Retries 429/529 with linear backoff (the docs
     /// recommend backing off rather than immediate retries).
-    static func evaluate(
+    public static func evaluate(
         state: String, questions: [TypeSafeQuestion], apiKey: String
     ) async throws -> JSONValue {
         let payload = try JSONEncoder().encode(request(state: state, questions: questions))
@@ -89,7 +96,7 @@ enum TypeSafeClient {
     /// Split into tiny per-answer functions: one big `format` made the Swift
     /// type-checker blow its time budget (each optional-chain + interpolation
     /// accumulates). Small functions type-check in microseconds.
-    static func format(_ root: JSONValue) -> String {
+    public static func format(_ root: JSONValue) -> String {
         guard let answers = root.objectValue?["answers"]?.objectValue else {
             return "TypeSafe returned no answers"
         }

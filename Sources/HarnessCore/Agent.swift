@@ -24,33 +24,43 @@ import Foundation
 // makes the loop safe and debuggable.
 // ---------------------------------------------------------------------------
 
-struct AgentRunError: Error, CustomStringConvertible {
-    let description: String
+public struct AgentRunError: Error, CustomStringConvertible {
+    public let description: String
+
+    public init(description: String) {
+        self.description = description
+    }
 }
 
-struct Agent {
-    var config: Config
-    var model: ChatModel
+public struct Agent {
+    public var config: Config
+    public var model: ChatModel
     /// How deep this agent is in the spawn chain (top agent = 0). Tools that
     /// can recurse (spawn_agent) are removed once the next spawn would hit
     /// config.maxAgentDepth, so the recursion always terminates.
-    var depth: Int = 0
+    public var depth: Int = 0
 
     /// The tools THIS agent may use. At the depth cap, spawn_agent disappears
     /// entirely — cleaner than letting the model attempt a doomed spawn.
     // pi-lens-ignore on the next line: SourceKit's in-session index went stale
     // when maxAgentDepth was added to Config mid-session (a server restart
     // resolves it); swiftc type-checks clean — this only silences the gate.
-    var availableTools: [ToolSpec] {  // pi-lens-ignore: SourceKit:unknown
+    public var availableTools: [ToolSpec] {  // pi-lens-ignore: SourceKit:unknown
         depth + 1 < config.maxAgentDepth
             ? Tools.all
             : Tools.all.filter { $0.name != "spawn_agent" }
     }
 
+    public init(config: Config, model: ChatModel, depth: Int = 0) {
+        self.config = config
+        self.model = model
+        self.depth = depth
+    }
+
     /// Run one user task to completion: call the model, execute tools, repeat
     /// until the model answers with plain text (or the turn cap is hit).
     /// Mutates `messages` in place so the REPL can persist the session.
-    mutating func run(task input: String, messages: inout [Message]) async throws {
+    public mutating func run(task input: String, messages: inout [Message]) async throws {
         messages.append(.user(input))
 
         for turnIndex in 1...config.maxTurns {

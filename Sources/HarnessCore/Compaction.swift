@@ -27,11 +27,11 @@ import Foundation
 // instead; the byte estimate keeps this deterministic and testable.
 // ---------------------------------------------------------------------------
 
-enum Compaction {
+public enum Compaction {
     // ---- Pure helpers (unit-testable without any API call) ----------------
 
     /// Byte-size estimate of the conversation.
-    static func size(of messages: [Message]) -> Int {
+    public static func size(of messages: [Message]) -> Int {
         messages.reduce(0) { total, message in
             total + (message.content?.utf8.count ?? 0) + (message.toolCalls?.count ?? 0) * 64
         }
@@ -43,7 +43,7 @@ enum Compaction {
     /// would reject the orphaned result. User and assistant messages (with
     /// or without tool_calls) are always safe — a tail starting at an
     /// assistant tool_call keeps its results, which follow it in history.
-    static func isCleanBoundary(_ message: Message) -> Bool {
+    public static func isCleanBoundary(_ message: Message) -> Bool {
         message.role != "tool"
     }
 
@@ -51,7 +51,7 @@ enum Compaction {
     /// cut point until a clean boundary is found (so the tail is at least
     /// `keepTail` messages whenever any boundary exists). Returns nil when
     /// even message 1 isn't a boundary — then we can't compact at all.
-    static func tailStart(in messages: [Message], keepTail: Int) -> Int? {
+    public static func tailStart(in messages: [Message], keepTail: Int) -> Int? {
         var index = max(1, messages.count - max(2, keepTail))
         while index > 1 {
             if isCleanBoundary(messages[index]) { return index }
@@ -62,7 +62,7 @@ enum Compaction {
 
     /// Render the older portion as plain text for the summarizer call.
     /// Each message is capped so one huge tool result can't dominate.
-    static func transcript(_ messages: [Message], perMessageCap: Int = 1500) -> String {
+    public static func transcript(_ messages: [Message], perMessageCap: Int = 1500) -> String {
         messages.map { message in
             var text = message.content ?? ""
             if text.count > perMessageCap {
@@ -96,7 +96,7 @@ enum Compaction {
     /// short sessions it is a cheap size check.
     /// Upper bound on the summary message we accept (~200 words + prefix).
     private static let maxSummaryBytes = 1_300
-    static func compactIfNeeded(
+    public static func compactIfNeeded(
         _ messages: inout [Message],
         config: Config,
         model: ChatModel

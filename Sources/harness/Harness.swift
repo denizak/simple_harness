@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 // Version reported by --version; bump when the harness changes shape.
 let harnessVersion = "0.2.0"
@@ -186,18 +187,15 @@ struct HarnessMain {
                 let url = argument.isEmpty ? nil : URL(fileURLWithPath: argument)
                 let session = try Session.load(from: url)
                 messages = session.messages
-                // Precedence guard (same family as the borrow fix): a session
-                // records a PAST run — it must not silently override the
-                // provider/model you launched with. Restore the model only
-                // when the session ran on the same endpoint; otherwise keep
-                // the launch configuration and say so.
-                if let sessionURL = session.baseURL, sessionURL != agent.config.baseURL {
-                    print(AgentUI.warn(
-                        "session was created on \(sessionURL) — keeping current model " +
-                        "\(agent.config.model); only the conversation was restored"))
+                // Precedence policy lives on Session.restoreModel — the model
+                // applies only when the session ran on the same endpoint.
+                if let restored = session.restoreModel(activeBaseURL: agent.config.baseURL) {
+                    agent.config.model = restored
+                    print(AgentUI.dim("loaded \(session.messages.count) messages (\(restored))"))
                 } else {
-                    agent.config.model = session.model
-                    print(AgentUI.dim("loaded \(session.messages.count) messages (\(session.model))"))
+                    print(AgentUI.warn(
+                        "session was created on a different endpoint — keeping current model " +
+                        "\(agent.config.model); only the conversation was restored"))
                 }
             } catch { print(AgentUI.errorText("error: \(error)")) }
         case "/retry":

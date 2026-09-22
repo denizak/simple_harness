@@ -28,13 +28,13 @@ import Foundation
 ///   envThenBorrowForAutodetect   same, and a borrowed key also satisfies
 ///                                AUTODETECT (only deepseek: its zero-setup
 ///                                default is shipped behavior)
-enum KeyResolution: Sendable {
+public enum KeyResolution: Sendable {
     case envOnly
     case envThenBorrow(piAuthEntry: String)
     case envThenBorrowForAutodetect(piAuthEntry: String)
 
     /// The pi auth.json entry to borrow, if this policy borrows at all.
-    var borrowEntry: String? {
+    public var borrowEntry: String? {
         switch self {
         case .envOnly: return nil
         case .envThenBorrow(let entry): return entry
@@ -43,7 +43,7 @@ enum KeyResolution: Sendable {
     }
 
     /// Whether a borrowed key may satisfy AUTODETECT (not just --provider).
-    var borrowsForAutodetect: Bool {
+    public var borrowsForAutodetect: Bool {
         if case .envThenBorrowForAutodetect = self { return true }
         return false
     }
@@ -51,28 +51,28 @@ enum KeyResolution: Sendable {
 
 /// Which token-limit field the server accepts (a per-provider quirk):
 /// newer OpenAI models reject `max_tokens` and want `max_completion_tokens`.
-enum TokenLimitField: String, Sendable {
+public enum TokenLimitField: String, Sendable {
     case maxTokens = "max_tokens"
     case maxCompletionTokens = "max_completion_tokens"
 }
 
-struct ProviderProfile: Sendable {
-    var name: String
-    var baseURL: String
+public struct ProviderProfile: Sendable {
+    public var name: String
+    public var baseURL: String
     /// Environment variables that may hold this provider's API key.
-    var envKeys: [String]
-    var defaultModel: String
+    public var envKeys: [String]
+    public var defaultModel: String
     /// Key-acquisition policy — see KeyResolution.
-    var keyResolution: KeyResolution
+    public var keyResolution: KeyResolution
     /// Token-limit field quirk (see TokenLimitField).
-    var tokenLimitField: TokenLimitField
+    public var tokenLimitField: TokenLimitField
     /// May the client send stream_options.include_usage while streaming?
-    var sendsStreamOptions: Bool
+    public var sendsStreamOptions: Bool
 
     /// Explicit init with defaults so catalog entries only declare their
     /// differences (the synthesized memberwise init would demand every
     /// parameter — Swift doesn't apply property defaults to it).
-    init(
+    public init(
         name: String,
         baseURL: String,
         envKeys: [String],
@@ -91,22 +91,22 @@ struct ProviderProfile: Sendable {
     }
 
     /// First env key present in the given environment.
-    func key(in env: [String: String]) -> String? {
+    public func key(in env: [String: String]) -> String? {
         envKeys.compactMap { env[$0] }.first
     }
 
     /// Key borrowed from pi's stored auth, when this profile's policy
     /// borrows at all.
-    func borrowedKey() -> String? {
+    public func borrowedKey() -> String? {
         guard let entry = keyResolution.borrowEntry else { return nil }
         return piAuthApiKey(entry)
     }
 }
 
-extension Config {
+public extension Config {
     /// The well-known provider catalog. All of these speak the OpenAI
     /// Chat Completions dialect, so one client covers them all.
-    static let catalog: [String: ProviderProfile] = [
+    public static let catalog: [String: ProviderProfile] = [
         "openai": ProviderProfile(
             name: "openai",
             baseURL: "https://api.openai.com/v1",
@@ -176,7 +176,7 @@ extension Config {
     /// Provider ids checked, in order, when no --provider flag is given:
     /// the first one with an API key in the environment wins. Coding-plan
     /// profiles are deliberately absent — their quota is opt-in only.
-    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
+    public static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
 }
 
 // ---------------------------------------------------------------------------
@@ -198,11 +198,11 @@ func piAuthApiKey(_ provider: String) -> String? {
 
 /// Provider borrowed from pi's ~/.pi/agent/models.json, if present. Lets the
 /// harness reuse whatever provider this machine already configured for pi.
-struct PIProvider {
-    var name: String
-    var baseURL: String
-    var apiKey: String
-    var model: String
+public struct PIProvider {
+    public var name: String
+    public var baseURL: String
+    public var apiKey: String
+    public var model: String
 }
 
 func piProviderConfig() -> PIProvider? {

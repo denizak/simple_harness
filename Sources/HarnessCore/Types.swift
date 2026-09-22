@@ -17,15 +17,26 @@ import Foundation
 /// One tool invocation the model asked for. `arguments` stays a raw JSON
 /// *string* — that's how the wire format carries it (models emit a string, we
 /// parse it with JSONValue).
-struct ToolCall: Codable, Sendable, Equatable {
-    struct FunctionCall: Codable, Sendable, Equatable {
-        var name: String
-        var arguments: String
+public struct ToolCall: Codable, Sendable, Equatable {
+    public struct FunctionCall: Codable, Sendable, Equatable {
+        public var name: String
+        public var arguments: String
+
+        public init(name: String, arguments: String) {
+            self.name = name
+            self.arguments = arguments
+        }
     }
 
-    var id: String
-    var type: String
-    var function: FunctionCall
+    public var id: String
+    public var type: String
+    public var function: FunctionCall
+
+    public init(id: String, type: String = "function", function: FunctionCall) {
+        self.id = id
+        self.type = type
+        self.function = function
+    }
 }
 
 /// A single conversation message in OpenAI chat format.
@@ -33,14 +44,14 @@ struct ToolCall: Codable, Sendable, Equatable {
 ///   - user / system messages:      `content`
 ///   - assistant asking for tools:  `toolCalls` (+ maybe `content`)
 ///   - tool result:                 `toolCallId` + `content`
-struct Message: Codable, Sendable {
-    var role: String
-    var content: String?
-    var toolCalls: [ToolCall]?
-    var toolCallId: String?
+public struct Message: Codable, Sendable {
+    public var role: String
+    public var content: String?
+    public var toolCalls: [ToolCall]?
+    public var toolCallId: String?
     /// Tool result messages are named after the tool (protocol detail; some
     /// servers want it). Encoded only for tool messages.
-    var name: String?
+    public var name: String?
 
     private enum CodingKeys: String, CodingKey {
         case role, content
@@ -49,9 +60,18 @@ struct Message: Codable, Sendable {
         case name
     }
 
+    public init(role: String, content: String?, toolCalls: [ToolCall]?,
+                toolCallId: String? = nil, name: String? = nil) {
+        self.role = role
+        self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
+        self.name = name
+    }
+
     // Always emit "content" (as null when absent) — some servers reject
     // assistant tool_call messages without an explicit content: null.
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(role, forKey: .role)
         try container.encode(content, forKey: .content)
@@ -61,31 +81,31 @@ struct Message: Codable, Sendable {
     }
 
     // ---- Constructors (sugar that keeps the loop code readable) ----
-    static func system(_ text: String) -> Message {
+    public static func system(_ text: String) -> Message {
         Message(role: "system", content: text, toolCalls: nil, toolCallId: nil, name: nil)
     }
 
-    static func user(_ text: String) -> Message {
+    public static func user(_ text: String) -> Message {
         Message(role: "user", content: text, toolCalls: nil, toolCallId: nil, name: nil)
     }
-    static func tool(result: String, for call: ToolCall) -> Message {
+    public static func tool(result: String, for call: ToolCall) -> Message {
         Message(role: "tool", content: result, toolCalls: nil, toolCallId: call.id, name: call.function.name)
     }
 }
 
 /// What the model produced in one turn.
-struct AssistantTurn: Sendable {
-    var text: String            // visible reply ("" when it only called tools)
-    var toolCalls: [ToolCall]   // [] when it replied with text only
-    var finishReason: String    // "stop" | "tool_calls" | ...
-    var usage: Usage?
+public struct AssistantTurn: Sendable {
+    public var text: String            // visible reply ("" when it only called tools)
+    public var toolCalls: [ToolCall]   // [] when it replied with text only
+    public var finishReason: String    // "stop" | "tool_calls" | ...
+    public var usage: Usage?
 
-    var wantsTools: Bool { !toolCalls.isEmpty }
+    public var wantsTools: Bool { !toolCalls.isEmpty }
 }
 
-struct Usage: Sendable {
-    var promptTokens: Int
-    var completionTokens: Int
+public struct Usage: Sendable {
+    public var promptTokens: Int
+    public var completionTokens: Int
 }
 
 // ---------------------------------------------------------------------------
@@ -97,23 +117,30 @@ struct Usage: Sendable {
 // fumbles — write them like API docs.
 // ---------------------------------------------------------------------------
 
-struct ToolSpec: Sendable {
-    var name: String
-    var description: String
+public struct ToolSpec: Sendable {
+    public var name: String
+    public var description: String
     /// JSON Schema for the `parameters` object.
-    var parameters: JSONValue
+    public var parameters: JSONValue
     /// Execute with parsed arguments; returns the text fed back to the model.
     /// `context` carries what a tool needs from the harness itself — config,
     /// the parent's model client, cwd, and the agent's nesting depth (used by
     /// spawn_agent to enforce the recursion cap).
-    var run: @Sendable ([String: JSONValue], ToolContext) async throws -> String
+    public var run: @Sendable ([String: JSONValue], ToolContext) async throws -> String
 }
 
 /// What a tool needs from the harness around it. Passed to every tool run.
-struct ToolContext: Sendable {
-    var config: Config
-    var model: ChatModel
-    var cwd: String
+public struct ToolContext: Sendable {
+    public var config: Config
+    public var model: ChatModel
+    public var cwd: String
     /// How deep this agent is in the spawn chain (top agent = 0).
-    var depth: Int
+    public var depth: Int
+
+    public init(config: Config, model: ChatModel, cwd: String, depth: Int = 0) {
+        self.config = config
+        self.model = model
+        self.cwd = cwd
+        self.depth = depth
+    }
 }
