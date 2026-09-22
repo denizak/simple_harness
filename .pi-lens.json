@@ -3,5 +3,10 @@
   "ignore": [
     ".build/**",
     ".harness/**"
-  ]
+  ],
+  "rules": {
+    "stale-lsp-session": {
+      "disable": ["SourceKit:unknown"]
+    }
+  }
 }
