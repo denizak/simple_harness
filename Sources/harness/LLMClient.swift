@@ -94,7 +94,7 @@ struct OpenAICompatClient: ChatModel {
     }
 
     func complete(_ messages: [Message], tools: [ToolSpec]) async throws -> AssistantTurn {
-        let (body, request) = try requestFor(messages: messages, tools: tools, streaming: false)
+        let (_, request) = try requestFor(messages: messages, tools: tools, streaming: false)
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {

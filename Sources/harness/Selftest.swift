@@ -198,6 +198,44 @@ enum SelfTest {
         output = await runTool { try await Tools.spawnAgent.run(["task": .string("x")] as [String: JSONValue], capped) }
         check("spawn_agent refuses at depth cap", output.contains("depth limit"), output)
 
+        // ---- DeepSeek: provider resolution with the env key -----------------
+        let deepseek = Config.resolve(arguments: [], env: ["DEEPSEEK_API_KEY": "sk-test"])
+        check("deepseek autodetect (DEEPSEEK_API_KEY)",
+              deepseek.provider == "deepseek" && deepseek.baseURL == "https://api.deepseek.com"
+                  && deepseek.model == "deepseek-flash",
+              "provider=\(deepseek.provider) model=\(deepseek.model)")
+
+        // ---- TypeSafe: request building + answer formatting (pure) ----------
+        let judged = [
+            TypeSafeQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
+                             criteria: .object(["true": .string("Time-sensitive"),
+                                                "false": .string("No urgency")])),
+            TypeSafeQuestion(id: "team", type: "choice", instructions: "Which team?",
+                             criteria: .object(["billing": .string("Payments"),
+                                                "tech": .string("Bugs")])),
+            TypeSafeQuestion(id: "severity", type: "score", instructions: "How severe?",
+                             criteria: .array([.string("Low"), .string("High")])),
+        ]
+        let safeRequest = TypeSafeClient.request(state: "server down", questions: judged)
+        let requestFields = safeRequest.objectValue ?? [:]
+        check("TypeSafe request shape",
+              requestFields["model"]?.stringValue == "jev-latest"
+                  && requestFields["state"]?.stringValue == "server down"
+                  && requestFields["questions"]?.objectValue?.count == 3,
+              "keys=\(requestFields.keys.sorted().joined(separator: ","))")
+        check("TypeSafe noul criteria carried into the request",
+              requestFields["questions"]?.objectValue?["urgent"]?.objectValue?["criteria"]?
+                  .objectValue?["true"]?.stringValue == "Time-sensitive", "")
+        // Formatting: the documented response shape renders model-readable lines.
+        // Formatting: the documented response shape renders model-readable lines.
+        let sampleJSON = #"{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95},"# +
+            #""team":{"type":"choice","choice":"billing","probabilities":{"billing":0.88,"tech":0.12},"confidence":0.81}}}"#
+        let sampleResponse = JSONValue.parse(sampleJSON) ?? .null
+        let rendered = TypeSafeClient.format(sampleResponse)
+        check("TypeSafe format renders probabilities",
+              rendered.contains("95%") && rendered.contains("billing") && rendered.contains("0.81"),
+              rendered.replacingOccurrences(of: "\n", with: " | "))
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }

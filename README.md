@@ -87,11 +87,13 @@ All providers speak the OpenAI Chat Completions dialect — one client covers al
 |---|---|---|
 | `ollama` (default) | local endpoint `http://127.0.0.1:11434/v1` | `glm-5.3-flash:cloud` |
 | `ollama-cloud` | `export OLLAMA_API_KEY=…` ([get a key](https://ollama.com/settings/keys)) | `kimi-k2.7-code` |
+| `deepseek` | `export DEEPSEEK_API_KEY=…` — or borrow the key pi has stored in `~/.pi/agent/auth.json` automatically | `deepseek-flash` |
 | `openai` (ChatGPT) | `export OPENAI_API_KEY=sk-…` | `gpt-4o-mini` |
 | `zai` (Z.ai / Zhipu GLM) | `export ZAI_API_KEY=…` | `glm-4.6` |
 
 Autodetect: the first provider with a key in the environment wins, in the
-order **ollama-cloud → zai → openai** (set `--provider` to be explicit).
+order **ollama-cloud → zai → deepseek → openai** (set `--provider` to be
+explicit). DeepSeek also borrows a key stored in pi's `auth.json`.
 Every value is overridable:
 
 ```bash
@@ -145,6 +147,12 @@ the only question the stub can't: does the request satisfy the real server?
   to `arguments` — which `SSEAssembler` stitches back into a full turn. That
   assembler is a pure struct, so `--selftest` unit-tests it with canned chunks.
   Disable with `HARNESS_STREAMING=0`.
+- **Typed judgments (TypeSafe).** The `judge` tool calls TypeSafe's System
+  One model (Jev) — answers with calibrated probabilities, not prose:
+  yes/no (noul), pick-one (choice: distribution + confidence), rubric score.
+  Enable with `TYPESAFE_API_KEY`. The agent reaches for it when a decision
+  wants a number ("is this urgent? 0.96") instead of generated text; Jev
+  answers, the agent loop still owns the workflow.
 - **Sub-agents (orchestration).** A `spawn_agent` tool: the model delegates a
   self-contained subtask to a fresh agent (same provider and tools, empty
   conversation, same cwd) and gets back only the final report — bulk work

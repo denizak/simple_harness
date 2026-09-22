@@ -51,6 +51,9 @@ struct Config: Sendable {
     /// How deep spawn_agent may nest: 0 = top agent, so 2 allows
     /// top → sub → sub-sub. At the cap the tool disappears entirely.
     var maxAgentDepth: Int = 2
+    /// TypeSafe API key (https://docs.typesafe.ai) — powers the `judge` tool.
+    /// Read from the environment; optional — the tool reports its absence.
+    var typesafeApiKey: String?
 
     /// The well-known provider catalog. All of these speak the OpenAI
     /// Chat Completions dialect, so one client covers them all.
@@ -66,6 +69,15 @@ struct Config: Sendable {
             baseURL: "https://api.z.ai/api/paas/v4",
             envKeys: ["ZAI_API_KEY", "Z_AI_API_KEY", "ZHIPU_API_KEY"],
             defaultModel: "glm-4.6"
+        ),
+        // DeepSeek: OpenAI-compatible at the root (our client appends
+        // /chat/completions). Models per docs: deepseek-flash, deepseek-v4-pro.
+        // Optional thinking controls exist ("thinking", "reasoning_effort").
+        "deepseek": ProviderProfile(
+            name: "deepseek",
+            baseURL: "https://api.deepseek.com",
+            envKeys: ["DEEPSEEK_API_KEY"],
+            defaultModel: "deepseek-flash"
         ),
         // Ollama Cloud: same OpenAI-compatible API as the local server, but
         // models run in Ollama's datacenter. Model ids are the raw tags from
@@ -88,7 +100,7 @@ struct Config: Sendable {
 
     /// Provider ids checked, in order, when no --provider flag is given:
     /// the first one with an API key in the environment wins.
-    static let autodetectOrder = ["ollama-cloud", "zai", "openai"]
+    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
 
     static func resolve(arguments: [String]) -> Config {
         resolve(arguments: arguments, env: ProcessInfo.processInfo.environment)
@@ -97,6 +109,14 @@ struct Config: Sendable {
     /// Injectable-environment variant so the selftest can verify provider
     /// selection without touching real secrets.
     static func resolve(arguments: [String], env: [String: String]) -> Config {
+        var env = env
+        // pi stores API keys in ~/.pi/agent/auth.json; when the user has a
+        // DeepSeek key there but no env var, borrow it so `--provider
+        // deepseek` works with zero setup. (Same spirit as the models.json
+        // fallback below.)
+        if env["DEEPSEEK_API_KEY"] == nil, let borrowed = piDeepSeekKey() {
+            env["DEEPSEEK_API_KEY"] = borrowed
+        }
         var config = Config(
             provider: "ollama",
             baseURL: "http://127.0.0.1:11434/v1",
@@ -143,6 +163,8 @@ struct Config: Sendable {
            ["0", "false", "no", "off"].contains(value.lowercased()) {
             config.streaming = false
         }
+        // Optional integrations (nil when unset).
+        config.typesafeApiKey = env["TYPESAFE_API_KEY"]
 
         // 5. Explicit flags always win: --base-url/--api-key/--model.
         var iterator = arguments.makeIterator()
@@ -165,6 +187,20 @@ struct Config: Sendable {
             apiKey: profile.key(in: env) ?? "none",
             model: profile.defaultModel
         )
+    }
+
+    /// DeepSeek key stored by pi in ~/.pi/agent/auth.json, if present.
+    /// Only valid "api_key"-typed entries are used (OAuth tokens are not
+    /// DeepSeek API keys).
+    private static func piDeepSeekKey() -> String? {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".pi/agent/auth.json")
+        guard let data = try? Data(contentsOf: path),
+              let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
+              let entry = root.objectValue?["deepseek"]?.objectValue else { return nil }
+        let type = entry["type"]?.stringValue ?? ""
+        let key = entry["key"]?.stringValue ?? ""
+        return type.lowercased() == "api_key" && !key.isEmpty ? key : nil
     }
 
     private static func flagValue(_ flag: String, in arguments: [String]) -> String? {

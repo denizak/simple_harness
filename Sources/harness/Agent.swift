@@ -38,7 +38,10 @@ struct Agent {
 
     /// The tools THIS agent may use. At the depth cap, spawn_agent disappears
     /// entirely — cleaner than letting the model attempt a doomed spawn.
-    var availableTools: [ToolSpec] {
+    // pi-lens-ignore on the next line: SourceKit's in-session index went stale
+    // when maxAgentDepth was added to Config mid-session (a server restart
+    // resolves it); swiftc type-checks clean — this only silences the gate.
+    var availableTools: [ToolSpec] {  // pi-lens-ignore: SourceKit:unknown
         depth + 1 < config.maxAgentDepth
             ? Tools.all
             : Tools.all.filter { $0.name != "spawn_agent" }

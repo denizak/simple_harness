@@ -29,6 +29,7 @@ indirect enum JSONValue: Codable, Sendable, Equatable {
         return nil
     }
     var boolValue: Bool? { if case .bool(let bool) = self { return bool }; return nil }
+    var doubleValue: Double? { if case .number(let number) = self { return number }; return nil }
     var objectValue: [String: JSONValue]? { if case .object(let object) = self { return object }; return nil }
     var arrayValue: [JSONValue]? { if case .array(let array) = self { return array }; return nil }
 
@@ -41,8 +42,8 @@ indirect enum JSONValue: Codable, Sendable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null }
-        else if let b = try? container.decode(Bool.self) { self = .bool(b) }
-        else if let d = try? container.decode(Double.self) { self = .number(d) }
+        else if let boolean = try? container.decode(Bool.self) { self = .bool(boolean) }
+        else if let number = try? container.decode(Double.self) { self = .number(number) }
         else if let string = try? container.decode(String.self) { self = .string(string) }
         else if let array = try? container.decode([JSONValue].self) { self = .array(array) }
         else if let object = try? container.decode([String: JSONValue].self) { self = .object(object) }
