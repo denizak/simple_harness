@@ -14,6 +14,10 @@ import Foundation
 struct Session: Codable, Sendable {
     var model: String
     var provider: String
+    /// Endpoint the session ran on. Optional so older session files (before
+    /// this field existed) still decode — /load uses it to refuse silently
+    /// mixing a session's model with a different endpoint's configuration.
+    var baseURL: String?
     var messages: [Message]
 
     static var defaultPath: URL {
@@ -41,6 +45,9 @@ extension Agent {
     /// Persist the conversation alongside its model identity so /load can
     /// restore the exact configuration the session ran with.
     func saveSession(messages: [Message], to url: URL? = nil) throws {
-        try Session(model: config.model, provider: config.provider, messages: messages).save(to: url)
+        try Session(
+            model: config.model, provider: config.provider,
+            baseURL: config.baseURL, messages: messages
+        ).save(to: url)
     }
 }

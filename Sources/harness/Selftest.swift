@@ -299,6 +299,46 @@ enum SelfTest {
                   borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
         }
 
+        // ---- /load precedence: a session must not override launch config ----
+        // Deterministic, no API: write sessions recorded on different
+        // endpoints and confirm the launch model survives a mismatch.
+        do {
+            let sessionDir = NSTemporaryDirectory() + "harness-load-\(UUID().uuidString)/"
+            try FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: sessionDir) }
+            let sessionPath = sessionDir + "session.json"
+
+            let loadConfig = Config(
+                provider: "stub", baseURL: "https://launch.example.com/v1",
+                apiKey: "none", model: "launch-model")
+            var loadAgent = Agent(config: loadConfig, model: OpenAICompatClient(config: loadConfig))
+            var loadMessages: [Message] = [.system("sys")]
+
+            // Endpoint mismatch: the session's model must NOT be applied.
+            let elsewhere = Session(
+                model: "some-other-model", provider: "somewhere-else",
+                baseURL: "https://other.example.com/v1", messages: [.user("hi")])
+            try elsewhere.save(to: URL(fileURLWithPath: sessionPath))
+            await HarnessMain.handleCommand("/load \(sessionPath)", &loadAgent, &loadMessages)
+            check("/load keeps launch model on endpoint mismatch",
+                  loadAgent.config.model == "launch-model", loadAgent.config.model)
+            check("/load restored the conversation",
+                  loadMessages.contains { $0.role == "user" && $0.content == "hi" }, "")
+
+            // Same endpoint → the session model IS restored (backward compat
+            // with the original /load behavior and with old session files,
+            // which carry no baseURL at all).
+            let sameEndpoint = Session(
+                model: "same-model", provider: "stub",
+                baseURL: "https://launch.example.com/v1", messages: [.user("hi")])
+            try sameEndpoint.save(to: URL(fileURLWithPath: sessionPath))
+            await HarnessMain.handleCommand("/load \(sessionPath)", &loadAgent, &loadMessages)
+            check("/load restores model on endpoint match",
+                  loadAgent.config.model == "same-model", loadAgent.config.model)
+        } catch {
+            check("/load precedence checks ran", false, "\(error)")
+        }
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }

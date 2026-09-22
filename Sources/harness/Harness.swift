@@ -186,8 +186,19 @@ struct HarnessMain {
                 let url = argument.isEmpty ? nil : URL(fileURLWithPath: argument)
                 let session = try Session.load(from: url)
                 messages = session.messages
-                agent.config.model = session.model
-                print(AgentUI.dim("loaded \(session.messages.count) messages (\(session.model))"))
+                // Precedence guard (same family as the borrow fix): a session
+                // records a PAST run — it must not silently override the
+                // provider/model you launched with. Restore the model only
+                // when the session ran on the same endpoint; otherwise keep
+                // the launch configuration and say so.
+                if let sessionURL = session.baseURL, sessionURL != agent.config.baseURL {
+                    print(AgentUI.warn(
+                        "session was created on \(sessionURL) — keeping current model " +
+                        "\(agent.config.model); only the conversation was restored"))
+                } else {
+                    agent.config.model = session.model
+                    print(AgentUI.dim("loaded \(session.messages.count) messages (\(session.model))"))
+                }
             } catch { print(AgentUI.errorText("error: \(error)")) }
         case "/retry":
             // Drop the trailing user message (if any) and re-run the last task.
