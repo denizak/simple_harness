@@ -103,5 +103,17 @@ struct ToolSpec: Sendable {
     /// JSON Schema for the `parameters` object.
     var parameters: JSONValue
     /// Execute with parsed arguments; returns the text fed back to the model.
-    var run: @Sendable ([String: JSONValue], String) async throws -> String
+    /// `context` carries what a tool needs from the harness itself — config,
+    /// the parent's model client, cwd, and the agent's nesting depth (used by
+    /// spawn_agent to enforce the recursion cap).
+    var run: @Sendable ([String: JSONValue], ToolContext) async throws -> String
+}
+
+/// What a tool needs from the harness around it. Passed to every tool run.
+struct ToolContext: Sendable {
+    var config: Config
+    var model: ChatModel
+    var cwd: String
+    /// How deep this agent is in the spawn chain (top agent = 0).
+    var depth: Int
 }

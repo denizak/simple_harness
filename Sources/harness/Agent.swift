@@ -31,6 +31,18 @@ struct AgentRunError: Error, CustomStringConvertible {
 struct Agent {
     var config: Config
     var model: ChatModel
+    /// How deep this agent is in the spawn chain (top agent = 0). Tools that
+    /// can recurse (spawn_agent) are removed once the next spawn would hit
+    /// config.maxAgentDepth, so the recursion always terminates.
+    var depth: Int = 0
+
+    /// The tools THIS agent may use. At the depth cap, spawn_agent disappears
+    /// entirely — cleaner than letting the model attempt a doomed spawn.
+    var availableTools: [ToolSpec] {
+        depth + 1 < config.maxAgentDepth
+            ? Tools.all
+            : Tools.all.filter { $0.name != "spawn_agent" }
+    }
 
     /// Run one user task to completion: call the model, execute tools, repeat
     /// until the model answers with plain text (or the turn cap is hit).
@@ -52,12 +64,12 @@ struct Agent {
             let turn: AssistantTurn
             do {
                 if config.streaming {
-                    turn = try await model.stream(messages, tools: Tools.all) { fragment in
+                    turn = try await model.stream(messages, tools: availableTools) { fragment in
                         AgentUI.printStreaming(fragment)
                     }
                     if !turn.text.isEmpty { print() }  // close the streamed line
                 } else {
-                    turn = try await model.complete(messages, tools: Tools.all)
+                    turn = try await model.complete(messages, tools: availableTools)
                 }
             } catch let error as LLMError {
                 // Surface API errors with context; keep the history intact so
@@ -127,7 +139,12 @@ struct Agent {
 
         let output: String
         do {
-            output = try await tool.run(arguments, FileManager.default.currentDirectoryPath)
+            output = try await tool.run(arguments, ToolContext(
+                config: config,
+                model: model,
+                cwd: FileManager.default.currentDirectoryPath,
+                depth: depth
+            ))
         } catch {
             output = "error: \(error.localizedDescription)"
         }

@@ -145,6 +145,13 @@ the only question the stub can't: does the request satisfy the real server?
   to `arguments` — which `SSEAssembler` stitches back into a full turn. That
   assembler is a pure struct, so `--selftest` unit-tests it with canned chunks.
   Disable with `HARNESS_STREAMING=0`.
+- **Sub-agents (orchestration).** A `spawn_agent` tool: the model delegates a
+  self-contained subtask to a fresh agent (same provider and tools, empty
+  conversation, same cwd) and gets back only the final report — bulk work
+  burns the sub-agent's context, not the parent's. Guardrails: a depth cap
+  (`maxAgentDepth`, default 2 — at the cap the tool disappears entirely) and
+  failures reported as text so the parent can adapt. Watch an e2e run:
+  the sub-agent's own tool calls stream right under the parent's.
 - **Turn cap + output truncation.** `maxTurns` (25) stops runaway loops;
   tool output is truncated (20k chars) before it enters context — a 50 MB build
   log is not context, it's a bill.

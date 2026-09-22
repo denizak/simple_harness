@@ -21,7 +21,7 @@ import Foundation
 // ---------------------------------------------------------------------------
 
 enum Tools {
-    static let all: [ToolSpec] = [bash, grep, readFile, writeFile, editFile]
+    static let all: [ToolSpec] = [bash, grep, readFile, writeFile, editFile, spawnAgent]
 
     /// Look up a tool by name; nil if the model invented one.
     static func named(_ name: String) -> ToolSpec? { all.first { $0.name == name } }
@@ -48,23 +48,22 @@ enum Tools {
             ]),
             "required": .array([.string("command")]),
         ])
-    ) { arguments, _ in
+    ) { arguments, context in
         guard let command = arguments["command"]?.stringValue, !command.isEmpty else {
             return "error: 'command' (string) is required"
         }
         let timeout = Double(arguments["timeout_seconds"]?.intValue ?? 120)
-        return await runShell(command: command, timeout: timeout)
+        return await runShell(command: command, cwd: context.cwd, timeout: timeout)
     }
 
     /// Spawn /bin/zsh -lc <cmd>, capture stdout+stderr, kill on timeout.
     /// Async + detached so a long command never blocks the cooperative pool.
-    static func runShell(command: String, timeout: Double) async -> String {
+    static func runShell(command: String, cwd: String, timeout: Double) async -> String {
         await Task.detached {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = ["-lc", command]
-            process.currentDirectoryURL = URL(
-                fileURLWithPath: FileManager.default.currentDirectoryPath)
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
 
             let stdout = Pipe()
             let stderr = Pipe()
@@ -153,7 +152,7 @@ enum Tools {
             ]),
             "required": .array([.string("pattern")]),
         ])
-    ) { arguments, cwd in
+    ) { arguments, context in
         guard let pattern = arguments["pattern"]?.stringValue, !pattern.isEmpty else {
             return "error: 'pattern' (string) is required"
         }
@@ -167,7 +166,7 @@ enum Tools {
         }
 
         // Resolve the search root (absolute paths ignore `relativeTo`).
-        let cwdURL = URL(fileURLWithPath: cwd)
+        let cwdURL = URL(fileURLWithPath: context.cwd)
         let baseURL = URL(fileURLWithPath: arguments["path"]?.stringValue ?? ".",
                           relativeTo: cwdURL).standardizedFileURL
         var isDirectory: ObjCBool = false
@@ -356,5 +355,59 @@ enum Tools {
         } catch {
             return "error editing \(path): \(error.localizedDescription)"
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // spawn_agent — orchestration.
+    //
+    // The model can delegate a self-contained subtask to a FRESH agent (same
+    // provider and tools, but an empty conversation). Why? Bulk work —
+    // "read these 12 files and summarize" — would flood this conversation;
+    // a sub-agent burns its own context and returns only the report. This is
+    // pi's sub-agents in miniature, with the same two guardrails:
+    //   * depth cap (config.maxAgentDepth) so recursion terminates
+    //   * failures are TEXT — the parent reads the failure and adapts
+    // -----------------------------------------------------------------------
+    static let spawnAgent = ToolSpec(
+        name: "spawn_agent",
+        description: "Delegate a focused, self-contained subtask to a fresh sub-agent. " +
+                     "It runs with the same provider, tools and working directory but an empty " +
+                     "conversation, and returns only its final report. Use it for research or " +
+                     "bulk work that would flood this conversation; do NOT use it for trivial steps.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "task": .object([
+                    "type": .string("string"),
+                    "description": .string("Complete, self-contained instructions (the sub-agent sees nothing else)"),
+                ]),
+            ]),
+            "required": .array([.string("task")]),
+        ])
+    ) { arguments, context in
+        guard let task = arguments["task"]?.stringValue, !task.isEmpty else {
+            return "error: 'task' (string) is required"
+        }
+        guard context.depth < context.config.maxAgentDepth else {
+            return "error: spawn depth limit reached (\(context.config.maxAgentDepth)). " +
+                   "No more nesting — do the remaining work yourself."
+        }
+        print(AgentUI.dim("  \u{27F3} spawning sub-agent (depth \(context.depth + 1))"))
+
+        var subConfig = context.config
+        subConfig.maxTurns = min(subConfig.maxTurns, 15)  // tighter cap than the parent
+        var subMessages: [Message] = [
+            .system("You are a sub-agent spawned for one delegated task. Complete it in the " +
+                    "current working directory using the tools, then reply with a concise " +
+                    "final report. Current directory: \(context.cwd)")
+        ]
+        var subAgent = Agent(config: subConfig, model: context.model, depth: context.depth + 1)
+        do {
+            try await subAgent.run(task: task, messages: &subMessages)
+        } catch {
+            return "sub-agent failed: \(error)"
+        }
+        let report = subMessages.last?.content ?? "(sub-agent returned no text)"
+        return "SUB-AGENT REPORT:\n\(report)"
     }
 }

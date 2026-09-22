@@ -48,6 +48,9 @@ struct Config: Sendable {
     var compactKeepTail: Int = 8
     /// Stream model responses (SSE) and print text as it arrives.
     var streaming: Bool = true
+    /// How deep spawn_agent may nest: 0 = top agent, so 2 allows
+    /// top → sub → sub-sub. At the cap the tool disappears entirely.
+    var maxAgentDepth: Int = 2
 
     /// The well-known provider catalog. All of these speak the OpenAI
     /// Chat Completions dialect, so one client covers them all.

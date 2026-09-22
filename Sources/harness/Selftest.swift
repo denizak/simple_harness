@@ -31,15 +31,15 @@ enum SelfTest {
         // ---- write_file / read_file roundtrip ------------------------------
         let path = NSTemporaryDirectory() + "harness-selftest-\(UUID().uuidString).txt"
         let content: [String: JSONValue] = ["path": .string(path), "content": .string("alpha\nbeta\ngamma")]
-        var output = await runTool { try await Tools.writeFile.run(content, ".") }
+        var output = await runTool { try await Tools.writeFile.run(content, testContext(".")) }
         check("write_file", output.contains("wrote"), output)
 
-        output = await runTool { try await Tools.readFile.run(["path": .string(path)] as [String: JSONValue], ".") }
+        output = await runTool { try await Tools.readFile.run(["path": .string(path)] as [String: JSONValue], testContext(".")) }
         check("read_file numbers lines", output.contains("1  alpha") && output.contains("3  gamma"), output)
 
         // offset is 1-based: reading from line 2 must skip "alpha".
         output = await runTool {
-            try await Tools.readFile.run(["path": .string(path), "offset": .number(2)] as [String: JSONValue], ".")
+            try await Tools.readFile.run(["path": .string(path), "offset": .number(2)] as [String: JSONValue], testContext("."))
         }
         check("read_file offset", output.contains("2  beta") && !output.contains("alpha"), output)
 
@@ -48,8 +48,7 @@ enum SelfTest {
             try await Tools.editFile.run(
                 ["path": .string(path),
                  "old_text": .string("beta"),
-                 "new_text": .string("BETA")] as [String: JSONValue], "."
-            )
+                 "new_text": .string("BETA")] as [String: JSONValue], testContext("."))
         }
         check("edit_file unique replace", output.contains("edited"), output)
 
@@ -57,35 +56,31 @@ enum SelfTest {
             try await Tools.editFile.run(
                 ["path": .string(path),
                  "old_text": .string("nope"),
-                 "new_text": .string("x")] as [String: JSONValue], "."
-            )
+                 "new_text": .string("x")] as [String: JSONValue], testContext("."))
         }
         check("edit_file rejects missing text", output.contains("not found"), output)
 
         // "a" appears twice ("alpha", "gamma") — must refuse without replace_all.
         output = await runTool {
             try await Tools.editFile.run(
-                ["path": .string(path), "old_text": .string("a"), "new_text": .string("x")] as [String: JSONValue], "."
-            )
+                ["path": .string(path), "old_text": .string("a"), "new_text": .string("x")] as [String: JSONValue], testContext("."))
         }
         check("edit_file rejects ambiguous text", output.contains("appears"), output)
 
         // ---- bash: stdout capture, exit codes, watchdog timeout ------------
         output = await runTool {
             try await Tools.bash.run(
-                ["command": .string("echo hello-selftest")] as [String: JSONValue], "."
-            )
+                ["command": .string("echo hello-selftest")] as [String: JSONValue], testContext("."))
         }
         check("bash stdout", output.contains("hello-selftest") && output.contains("exit code: 0"), output)
 
-        output = await runTool { try await Tools.bash.run(["command": .string("exit 3")] as [String: JSONValue], ".") }
+        output = await runTool { try await Tools.bash.run(["command": .string("exit 3")] as [String: JSONValue], testContext(".")) }
         check("bash exit code", output.contains("exit code: 3"), output)
 
         // sleep 5 with a 1s budget → the watchdog must terminate the child.
         output = await runTool {
             try await Tools.bash.run(
-                ["command": .string("sleep 5"), "timeout_seconds": .number(1)] as [String: JSONValue], "."
-            )
+                ["command": .string("sleep 5"), "timeout_seconds": .number(1)] as [String: JSONValue], testContext("."))
         }
         check("bash timeout kill", output.contains("signal") || output.contains("exit code: 15"), output)
 
@@ -105,8 +100,7 @@ enum SelfTest {
 
         output = await runTool {
             try await Tools.grep.run(
-                ["pattern": .string("needle"), "path": .string(grepDir)] as [String: JSONValue], "."
-            )
+                ["pattern": .string("needle"), "path": .string(grepDir)] as [String: JSONValue], testContext("."))
         }
         check("grep default (case-sensitive) misses NEEDLE", output.contains("a.txt:1") && !output.contains("b.md"), output)
 
@@ -114,15 +108,13 @@ enum SelfTest {
             try await Tools.grep.run(
                 ["pattern": .string("needle"),
                  "path": .string(grepDir),
-                 "ignore_case": .bool(true)] as [String: JSONValue], "."
-            )
+                 "ignore_case": .bool(true)] as [String: JSONValue], testContext("."))
         }
         check("grep ignore_case hits both files", output.contains("NEEDLE upper") && output.contains("a.txt:1"), output)
 
         output = await runTool {
             try await Tools.grep.run(
-                ["pattern": .string("no-such-token"), "path": .string(grepDir)] as [String: JSONValue], "."
-            )
+                ["pattern": .string("no-such-token"), "path": .string(grepDir)] as [String: JSONValue], testContext("."))
         }
         check("grep reports no matches", output.contains("no matches"), output)
         try? FileManager.default.removeItem(atPath: grepDir)
@@ -201,6 +193,11 @@ enum SelfTest {
         check("SSE: finish reason + usage captured",
               assembled.finishReason == "tool_calls" && assembled.usage?.promptTokens == 10, "")
 
+        // ---- spawn_agent: depth cap enforced textually ----------------------
+        let capped = testContext(".", depth: 2)
+        output = await runTool { try await Tools.spawnAgent.run(["task": .string("x")] as [String: JSONValue], capped) }
+        check("spawn_agent refuses at depth cap", output.contains("depth limit"), output)
+
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
@@ -209,5 +206,12 @@ enum SelfTest {
     /// contract the agent loop relies on (tools report; they don't throw).
     private static func runTool(_ body: () async throws -> String) async -> String {
         do { return try await body() } catch { return "error: \(error.localizedDescription)" }
+    }
+
+    /// A ToolContext for direct tool calls in tests (dummy model — the tools
+    /// under test here never touch it; only spawn_agent would).
+    private static func testContext(_ cwd: String, depth: Int = 0) -> ToolContext {
+        let config = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none", model: "stub")
+        return ToolContext(config: config, model: OpenAICompatClient(config: config), cwd: cwd, depth: depth)
     }
 }
