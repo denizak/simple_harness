@@ -46,7 +46,7 @@ public struct Agent {
     // when maxAgentDepth was added to Config mid-session (a server restart
     // resolves it); swiftc type-checks clean — this only silences the gate.
     public var availableTools: [ToolSpec] {  // pi-lens-ignore: SourceKit:unknown
-        depth + 1 < config.maxAgentDepth
+        depth < config.maxAgentDepth
             ? Tools.all
             : Tools.all.filter { $0.name != "spawn_agent" }
     }
@@ -57,12 +57,39 @@ public struct Agent {
         self.depth = depth
     }
 
+    /// Runtime settings and the client built from them must change together;
+    /// otherwise a REPL model switch updates saved metadata but sends requests
+    /// through a stale value-type client configuration.
+    public mutating func reconfigure(
+        _ update: (inout Config) -> Void,
+        makeModel: (Config) -> ChatModel
+    ) {
+        update(&config)
+        model = makeModel(config)
+    }
+
+    public mutating func selectModel(
+        _ modelID: String,
+        makeModel: (Config) -> ChatModel
+    ) {
+        reconfigure({ $0.model = modelID }, makeModel: makeModel)
+    }
+
     /// Run one user task to completion: call the model, execute tools, repeat
     /// until the model answers with plain text (or the turn cap is hit).
     /// Mutates `messages` in place so the REPL can persist the session.
     public mutating func run(task input: String, messages: inout [Message]) async throws {
         messages.append(.user(input))
+        try await continueRun(messages: &messages)
+    }
 
+    /// Continue the existing, already-recorded task after a model failure or
+    /// turn cap. Does not append another user message, so completed tool calls
+    /// are not replayed when the API is explicitly retried.
+    public mutating func continueRun(messages: inout [Message]) async throws {
+        guard config.maxTurns > 0 else {
+            throw AgentRunError(description: "turn cap must be greater than zero")
+        }
         for turnIndex in 1...config.maxTurns {
             // ---- 0. Keep the context bounded --------------------------------
             // Cheap size check before every model call; only when the history
@@ -136,9 +163,9 @@ public struct Agent {
     /// the model should see the error and adapt.
     private func execute(_ call: ToolCall) async -> String {
         print(AgentUI.toolCall(call))
-        guard let tool = Tools.named(call.function.name) else {
-            let available = Tools.all.map { $0.name }.joined(separator: ", ")
-            let error = "error: unknown tool '\(call.function.name)'. available: \(available)"
+        guard let tool = availableTools.first(where: { $0.name == call.function.name }) else {
+            let available = availableTools.map { $0.name }.joined(separator: ", ")
+            let error = "error: tool '\(call.function.name)' is unavailable to this agent. available: \(available)"
             print(AgentUI.toolResult(error, isError: true))
             return error
         }

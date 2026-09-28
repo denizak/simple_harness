@@ -3,6 +3,10 @@ import Foundation
 import Glibc  // usleep / kill / SIGKILL / SIGTERM / fflush on Linux
 #endif
 
+private func resolveToolPath(_ path: String, cwd: String) -> URL {
+    URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: cwd, isDirectory: true)).standardizedFileURL
+}
+
 // ---------------------------------------------------------------------------
 // Tools.swift — the hands of the agent.
 //
@@ -56,6 +60,7 @@ public enum Tools {
             return "error: 'command' (string) is required"
         }
         let timeout = Double(arguments["timeout_seconds"]?.intValue ?? 120)
+        guard timeout.isFinite, timeout > 0 else { return "error: 'timeout_seconds' must be a positive finite number" }
         return await runShell(command: command, cwd: context.cwd, timeout: timeout)
     }
 
@@ -68,65 +73,10 @@ public enum Tools {
     // routing, classification, severity — instead of generated text. The
     // request/response contract is in TypeSafe.swift; failures are text.
     // -----------------------------------------------------------------------
-    /// Spawn <shell> -lc <cmd>, capture stdout+stderr, kill on timeout.
-    /// Async + detached so a long command never blocks the cooperative pool.
-    /// Shell choice is per-OS: zsh is the macOS default; zsh may not be
-    /// installed on Linux, and both understand `-lc`.
+    /// Run a bounded shell command in its own process group. Both streams are
+    /// drained concurrently; the runner retains only a bounded prefix.
     public static func runShell(command: String, cwd: String, timeout: Double) async -> String {
-        await Task.detached {
-            #if os(Linux)
-            let shellPath = "/bin/bash"
-            #else
-            let shellPath = "/bin/zsh"
-            #endif
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: shellPath)
-            process.arguments = ["-lc", command]
-            process.arguments = ["-lc", command]
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-
-            do { try process.run() } catch {
-                return "error spawning shell: \(error.localizedDescription)"
-            }
-
-            // Watchdog: after the deadline, terminate, then hard-kill.
-            let deadline = Date().addingTimeInterval(timeout)
-            DispatchQueue.global().async {
-                while process.isRunning && Date() < deadline {
-                    usleep(100_000)
-                }
-                if process.isRunning {
-                    process.terminate()
-                    usleep(500_000)
-                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                }
-            }
-
-            // Reading to EOF blocks until the child closes its pipes (i.e. it
-            // exits or is killed by the watchdog above) — do this BEFORE
-            // waitUntilExit to avoid the classic pipe-buffer deadlock.
-            let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-
-            let out = String(data: outData, encoding: .utf8) ?? "<binary stdout>"
-            let err = String(data: errData, encoding: .utf8) ?? "<binary stderr>"
-            let code = Int(process.terminationStatus)
-
-            var report = "exit code: \(code)"
-            if process.terminationReason == .uncaughtSignal {
-                report += " (killed by signal — timeout?)"
-            }
-            if !out.isEmpty { report += "\nstdout:\n\(out)" }
-            if !err.isEmpty { report += "\nstderr:\n\(err)" }
-            if out.isEmpty && err.isEmpty && code == 0 { report += " (no output)" }
-            return report
-        }.value
+        await ShellRunner.run(command: command, cwd: cwd, timeout: timeout)
     }
 
     // -----------------------------------------------------------------------
@@ -178,6 +128,7 @@ public enum Tools {
         }
         let ignoreCase = arguments["ignore_case"]?.boolValue ?? false
         let maxMatches = arguments["max_matches"]?.intValue ?? 50
+        guard maxMatches > 0 else { return "error: 'max_matches' must be greater than zero" }
 
         var regexOptions: NSRegularExpression.Options = []
         if ignoreCase { regexOptions.insert(.caseInsensitive) }
@@ -186,9 +137,11 @@ public enum Tools {
         }
 
         // Resolve the search root (absolute paths ignore `relativeTo`).
-        let cwdURL = URL(fileURLWithPath: context.cwd)
-        let baseURL = URL(fileURLWithPath: arguments["path"]?.stringValue ?? ".",
-                          relativeTo: cwdURL).standardizedFileURL
+        let cwdURL = URL(fileURLWithPath: context.cwd, isDirectory: true).standardizedFileURL
+        let requestedPath = arguments["path"]?.stringValue ?? "."
+        guard !requestedPath.isEmpty else { return "error: 'path' must not be empty" }
+        let baseURL = resolveToolPath(requestedPath, cwd: context.cwd)
+
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: baseURL.path, isDirectory: &isDirectory) else {
             return "error: no such path: \(baseURL.path)"
@@ -270,15 +223,18 @@ public enum Tools {
             ]),
             "required": .array([.string("path")]),
         ])
-    ) { arguments, _ in
+    ) { arguments, context in
         guard let path = arguments["path"]?.stringValue else {
             return "error: 'path' (string) is required"
         }
+        guard !path.isEmpty else { return "error: 'path' must not be empty" }
         let offset = max(1, arguments["offset"]?.intValue ?? 1)
         let limit = arguments["limit"]?.intValue ?? 2000
+        guard limit > 0 else { return "error: 'limit' must be greater than zero" }
+        let resolvedPath = resolveToolPath(path, cwd: context.cwd).path
 
         do {
-            let text = try String(contentsOfFile: path, encoding: .utf8)
+            let text = try String(contentsOfFile: resolvedPath, encoding: .utf8)
             let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
             guard offset <= lines.count else {
                 return "file has \(lines.count) lines; offset \(offset) is past the end"
@@ -311,12 +267,13 @@ public enum Tools {
             ]),
             "required": .array([.string("path"), .string("content")]),
         ])
-    ) { arguments, _ in
+    ) { arguments, context in
         guard let path = arguments["path"]?.stringValue else { return "error: 'path' (string) is required" }
+        guard !path.isEmpty else { return "error: 'path' must not be empty" }
         guard let content = arguments["content"]?.stringValue else { return "error: 'content' (string) is required" }
 
         do {
-            let url = URL(fileURLWithPath: path)
+            let url = resolveToolPath(path, cwd: context.cwd)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try content.write(to: url, atomically: true, encoding: .utf8)
@@ -351,14 +308,17 @@ public enum Tools {
             ]),
             "required": .array([.string("path"), .string("old_text"), .string("new_text")]),
         ])
-    ) { arguments, _ in
+    ) { arguments, context in
         guard let path = arguments["path"]?.stringValue else { return "error: 'path' (string) is required" }
+        guard !path.isEmpty else { return "error: 'path' must not be empty" }
         guard let oldText = arguments["old_text"]?.stringValue else { return "error: 'old_text' (string) is required" }
+        guard !oldText.isEmpty else { return "error: 'old_text' must not be empty" }
         guard let newText = arguments["new_text"]?.stringValue else { return "error: 'new_text' (string) is required" }
+        let resolvedPath = resolveToolPath(path, cwd: context.cwd).path
         let replaceAll = arguments["replace_all"]?.boolValue ?? false
 
         do {
-            let original = try String(contentsOfFile: path, encoding: .utf8)
+            let original = try String(contentsOfFile: resolvedPath, encoding: .utf8)
             guard original.contains(oldText) else {
                 return "error: old_text not found in \(path). read_file and retry with the exact text."
             }
@@ -370,8 +330,8 @@ public enum Tools {
                 }
             }
             let updated = original.replacingOccurrences(of: oldText, with: newText)
-            try updated.write(toFile: path, atomically: true, encoding: .utf8)
-            return "edited \(path)"
+            try updated.write(toFile: resolvedPath, atomically: true, encoding: .utf8)
+            return "edited \(resolvedPath)"
         } catch {
             return "error editing \(path): \(error.localizedDescription)"
         }

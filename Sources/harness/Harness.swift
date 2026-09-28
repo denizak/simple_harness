@@ -43,7 +43,7 @@ func helpText() {
     /tools            list available tools
     /save [file]      save the session (default .harness/session.json)
     /load [file]      load a session
-    /retry            re-send the last task (e.g. after an API error)
+    /retry            continue the current task after an API or turn-cap failure
     /exit             quit (also: Ctrl-D)
     Anything else you type becomes the next task for the agent.
     End a line with \\ to continue on the next line.
@@ -75,7 +75,7 @@ struct HarnessMain {
                   --model ID        model id override
                   --base-url URL    API endpoint override (OpenAI-compatible /chat/completions)
                   --api-key KEY     API key override
-                  --once TASK       run a single task non-interactively, then exit
+                  --once TASK       run one task non-interactively (nonzero exit on failure)
                   --reasoning EFF   reasoning effort for thinking models (none|low|medium|high|max)
                   --selftest        exercise the tool layer without any API call
                   --e2e             stub-model loop tests + a live round-trip
@@ -90,14 +90,17 @@ struct HarnessMain {
         var messages: [Message] = [.system(systemPrompt(for: config))]
         var agent = Agent(config: config, model: OpenAICompatClient(config: config))
 
+        var retryAvailable = false
+
         // Non-interactive single task (handy for testing and scripting):
         //   harness --once "build and test"
         // Runs ONE task through the loop, then exits. The & passes let the
         // agent mutate the conversation history in place.
         if let taskIndex = arguments.firstIndex(of: "--once"),
            arguments.indices.contains(taskIndex + 1) {
-            await runTask(arguments[taskIndex + 1], with: &agent, messages: &messages)
-            return
+            let succeeded = await runTask(arguments[taskIndex + 1], with: &agent, messages: &messages,
+                                          retryAvailable: &retryAvailable)
+            exit(succeeded ? 0 : 1)
         }
 
         // ---- Interactive REPL ------------------------------------------------
@@ -124,28 +127,63 @@ struct HarnessMain {
             // Dispatch: slash commands manipulate harness state; anything else
             // becomes a task and drives the agent loop until it finishes.
             if text.hasPrefix("/") {
-                await handleCommand(text, &agent, &messages)
+                await handleCommand(text, &agent, &messages, retryAvailable: &retryAvailable)
             } else {
-                await runTask(text, with: &agent, messages: &messages)
+                _ = await runTask(text, with: &agent, messages: &messages, retryAvailable: &retryAvailable)
             }
         }
     }
 
-    /// Drive one task through the loop and autosave the session afterwards.
-    /// Errors (API down, turn cap hit) are printed but do NOT kill the REPL —
-    /// the history is preserved so /retry can re-send the last task.
-    static func runTask(_ task: String, with agent: inout Agent, messages: inout [Message]) async {
+    /// Run a new task and persist its transcript on both success and failure.
+    /// The retry flag tracks only an incomplete task from this process.
+    @discardableResult
+    static func runTask(
+        _ task: String, with agent: inout Agent, messages: inout [Message], retryAvailable: inout Bool
+    ) async -> Bool {
+        var taskSucceeded = false
         do {
             try await agent.run(task: task, messages: &messages)
-            try? agent.saveSession(messages: messages)  // best-effort autosave
+            taskSucceeded = true
+            retryAvailable = false
         } catch {
+            retryAvailable = true
             print(AgentUI.errorText("error: \(error)"))
+        }
+        do {
+            try agent.saveSession(messages: messages)
+        } catch {
+            print(AgentUI.errorText("warning: could not save session: \(error)"))
+            return false
+        }
+        return taskSucceeded
+    }
+
+    /// Continue a failed task from its recorded transcript; never re-append
+    /// the prompt or replay a completed tool result.
+    static func retryTask(with agent: inout Agent, messages: inout [Message], retryAvailable: inout Bool) async {
+        guard retryAvailable else {
+            print(AgentUI.warn("nothing to retry"))
+            return
+        }
+        retryAvailable = false
+        do {
+            try await agent.continueRun(messages: &messages)
+        } catch {
+            retryAvailable = true
+            print(AgentUI.errorText("error: \(error)"))
+        }
+        do {
+            try agent.saveSession(messages: messages)
+        } catch {
+            print(AgentUI.errorText("warning: could not save session: \(error)"))
         }
     }
 
     /// Slash commands. Note how little state a REPL needs: the conversation
-    /// (messages) + configuration (agent). Everything else is derivable.
-    static func handleCommand(_ input: String, _ agent: inout Agent, _ messages: inout [Message]) async {
+    /// (messages) + configuration (agent) + one retry-eligibility bit.
+    static func handleCommand(
+        _ input: String, _ agent: inout Agent, _ messages: inout [Message], retryAvailable: inout Bool
+    ) async {
         var parts = input.split(separator: " ").map(String.init)
         let command = parts.removeFirst()
         let argument = parts.joined(separator: " ")
@@ -157,12 +195,13 @@ struct HarnessMain {
             exit(0)
         case "/reset":
             messages = [.system(systemPrompt(for: agent.config))]
+            retryAvailable = false
             print(AgentUI.dim("conversation reset"))
         case "/model":
             if argument.isEmpty {
                 print(AgentUI.dim("model: \(agent.config.model)"))
             } else {
-                agent.config.model = argument
+                agent.selectModel(argument) { OpenAICompatClient(config: $0) }
                 print(AgentUI.dim("model → \(argument)"))
             }
         case "/tools":
@@ -187,10 +226,11 @@ struct HarnessMain {
                 let url = argument.isEmpty ? nil : URL(fileURLWithPath: argument)
                 let session = try Session.load(from: url)
                 messages = session.messages
+                retryAvailable = false
                 // Precedence policy lives on Session.restoreModel — the model
                 // applies only when the session ran on the same endpoint.
                 if let restored = session.restoreModel(activeBaseURL: agent.config.baseURL) {
-                    agent.config.model = restored
+                    agent.selectModel(restored) { OpenAICompatClient(config: $0) }
                     print(AgentUI.dim("loaded \(session.messages.count) messages (\(restored))"))
                 } else {
                     print(AgentUI.warn(
@@ -199,15 +239,7 @@ struct HarnessMain {
                 }
             } catch { print(AgentUI.errorText("error: \(error)")) }
         case "/retry":
-            // Drop the trailing user message (if any) and re-run the last task.
-            if let last = messages.last, last.role == "user", last.content != nil {
-                messages.removeLast()
-                let task = last.content ?? ""
-                print(AgentUI.dim("retrying: \(task)"))
-                await runTask(task, with: &agent, messages: &messages)
-            } else {
-                print(AgentUI.warn("nothing to retry"))
-            }
+            await retryTask(with: &agent, messages: &messages, retryAvailable: &retryAvailable)
         default:
             print(AgentUI.warn("unknown command \(command); /help for commands"))
         }

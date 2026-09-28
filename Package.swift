@@ -19,7 +19,8 @@ let package = Package(
     name: "simple_harness",
     platforms: [.macOS(.v13)],
     targets: [
-        .target(name: "HarnessCore", path: "Sources/HarnessCore"),
+        .target(name: "ShellProcess", path: "Sources/ShellProcess", publicHeadersPath: "include"),
+        .target(name: "HarnessCore", dependencies: ["ShellProcess"], path: "Sources/HarnessCore"),
         .executableTarget(
             name: "harness",
             dependencies: ["HarnessCore"],

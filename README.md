@@ -61,6 +61,11 @@ swift build
 ```
 
 Slash commands inside the REPL: `/help /reset /model /tools /save /load /retry /exit`.
+`/retry` is available after a model/API or turn-cap failure and continues from
+the saved-in-memory transcript; it does not append a duplicate user prompt or
+re-execute tool calls that already have results. Failed transcripts are
+autosaved for inspection. `--once` exits nonzero when the task or session save
+fails.
 
 ## Install
 
@@ -93,9 +98,10 @@ All providers speak the OpenAI Chat Completions dialect — one client covers al
 
 Autodetect: the first provider with a key in the environment wins, in the
 order **ollama-cloud → zai → deepseek → openai** (set `--provider` to be
-explicit). pi-stored keys (`auth.json`) are borrowed **only** when you name
-the provider — `--provider deepseek` / `zai-coding-cn` work with zero setup,
-and an explicit env key always outranks a borrowed one.
+explicit). pi-stored keys (`auth.json`) are borrowed for named providers —
+`--provider deepseek` / `zai-coding-cn` work with zero setup. DeepSeek is the
+one profile that also permits a borrowed key to satisfy autodetection; explicit
+environment keys always outrank borrowed keys.
 Every value is overridable:
 
 ```bash

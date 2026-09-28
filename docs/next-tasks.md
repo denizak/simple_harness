@@ -1,0 +1,157 @@
+# Implemented follow-up tasks
+
+Originally planned against baseline `c96ad42`; implemented in order T1–T5 in the current worktree. No commits were created.
+
+## Baseline and order
+
+`swift test` on this workstation: 23 tests, two failing tests with three failed expectations. Both failing tests assume particular API-key entries exist whenever the user's auth file exists. No live provider tests were run.
+
+Execution order used: **T1 → T2 → T3 → T4 → T5**. T1 established a trustworthy test baseline; T2–T4 were otherwise independent. T5 built on T2's runtime-state work.
+
+Keep the dependency-free, macOS/Linux design. Use scripted models, temporary directories, and fake credentials in tests. Do not read or modify real credentials in tests. No live API calls are required for these tasks.
+
+## T1 — Make provider resolution tests hermetic
+
+**Why now:** `Config.resolve(arguments:env:)` still reads the real home directory. `ProviderTests.piKeyBorrowing` and `deepseekDefault` fail here because the existence of `auth.json` does not imply that it contains DeepSeek or Z.ai API keys.
+
+**Files:** `Sources/HarnessCore/Config.swift`, `Sources/HarnessCore/Providers.swift`, `Tests/HarnessTests/HarnessTests.swift`; update related checks in `Sources/harness/Selftest.swift` if they depend on the same assumption.
+
+**Implementation:**
+1. Introduce a Sendable snapshot of borrowed configuration: optional `PIProvider` plus a provider-name-to-API-key dictionary. Make `PIProvider` Sendable as needed.
+2. Keep the production resolver entry point loading that snapshot from disk. Add a resolver overload accepting an explicit snapshot; this overload must perform no filesystem reads.
+3. Refactor key selection to use the supplied snapshot rather than calling `borrowedKey()` during resolution. Keep existing precedence and DeepSeek's explicitly declared autodetect-borrowing behavior.
+4. Separate parsing from file loading so malformed JSON, OAuth entries, and empty keys can be tested with in-memory data.
+5. Replace the real-home-dependent tests with fake snapshots. Give all resolver tests explicit snapshots, including an empty one where appropriate.
+6. Correct README statements claiming borrowed keys are exclusively opt-in: the current DeepSeek policy is an exception. This task documents existing behavior, not a policy change.
+
+**Acceptance tests:**
+- Empty environment + empty snapshot selects local Ollama.
+- An explicit OpenAI environment key beats a borrowed DeepSeek key.
+- Borrowed DeepSeek is autodetected when there is no environment key.
+- Coding-plan credentials alone never trigger coding-plan autodetection.
+- Explicit provider selection borrows only the designated entry; explicit environment key wins.
+- Missing entries, OAuth entries, empty keys, and malformed input do not create credentials.
+- Borrowed provider-config fallback and CLI/env override precedence remain covered.
+- `swift test` passes regardless of the contents or existence of the developer's home configuration.
+
+**Out of scope:** new providers, changing default-provider policy, accessing real secrets.
+
+## T2 — Make model switches affect actual requests
+
+**Why:** `/model` and same-endpoint `/load` mutate `agent.config.model`, but `OpenAICompatClient` retains its original value-type `Config`. The displayed model and saved session can therefore differ from the model sent to the API.
+
+**Files:** `Sources/HarnessCore/Agent.swift`, `Sources/HarnessCore/Session.swift`, `Sources/harness/Harness.swift`, new `Tests/HarnessTests/RuntimeConfigurationTests.swift`.
+
+**Implementation:**
+1. Add one testable runtime reconfiguration operation in HarnessCore that replaces the agent configuration and its client together. Accept a client factory so tests can supply recording stub models; production uses `OpenAICompatClient.init(config:)`.
+2. Route `/model` and the accepted model-restoration branch of `/load` through this operation. Preserve messages, agent depth, and all unrelated configuration fields.
+3. Keep the existing load policy: same endpoint restores the saved model, different endpoint retains the active model, legacy sessions retain their documented behavior.
+4. Ensure the refreshed client is the one used by normal turns, streaming, compaction, and spawned agents.
+5. Add a comment explaining the configuration/client ownership rule to prevent future direct-mutation regressions.
+
+**Acceptance tests:**
+- After selecting model B from model A, request construction emits `model: B`, not merely a changed UI label.
+- Same-endpoint session restore produces requests for the restored model.
+- Different-endpoint restore retains the active endpoint, key, and model.
+- A recording client verifies the refreshed client reaches compaction and delegated work.
+- Saved session metadata agrees with the active request model.
+- Tests remain network-free; existing stub-model injection still works.
+
+**Out of scope:** switching providers interactively, redesigning `ChatModel`.
+
+## T3 — Enforce tool boundaries and validate dangerous arguments
+
+**Why:** `Agent.execute` resolves against `Tools.all`, not the advertised `availableTools`. Spawn visibility and execution guards disagree about the depth boundary. File tools ignore `ToolContext.cwd`; negative `read_file.limit` can reach `prefix` with an invalid count.
+
+**Files:** `Sources/HarnessCore/Agent.swift`, `Sources/HarnessCore/Tools.swift`, `Sources/HarnessCore/Config.swift`, new `Tests/HarnessTests/ToolBoundaryTests.swift`.
+
+**Decisions:** root depth is 0; `maxAgentDepth = 2` permits root → depth 1 → depth 2. At depth 2, spawning is forbidden. Depth 0 as a limit disables spawning. Absolute file paths remain permitted: cwd resolution is not a sandbox.
+
+**Implementation:**
+1. Advertise `spawn_agent` exactly when `depth < maxAgentDepth`. Keep the executor-side spawn guard consistent with that definition.
+2. Resolve requested tools against `availableTools`; return a tool-result error for unavailable or invented tools without executing them. List only available tools in the error.
+3. Add a shared path resolver using `ToolContext.cwd`; use it for read, write, edit, and grep. Do not change process-global cwd.
+4. Validate `read_file.limit > 0`, `grep.max_matches > 0`, and positive finite shell timeouts before execution. Preserve the existing offset clamp to 1. Reject empty file paths and empty `edit_file.old_text`.
+5. Return validation failures as tool-result text, leaving files unchanged.
+
+**Acceptance tests:**
+- Depth limits 0, 1, and 2 have matching advertised and executable behavior.
+- A scripted model requesting a hidden spawn tool cannot start a child; it receives one result for its call ID.
+- Relative file operations resolve within an explicit temporary cwd without `chdir`; absolute-path behavior still works.
+- Concurrent tests using the same relative filename in different directories remain isolated.
+- Zero/negative limits, invalid timeouts, and empty replacement needles return errors without crashes or writes.
+- Existing successful delegation and file-tool tests remain green.
+
+**Out of scope:** approval prompts, path confinement, general JSON Schema validation.
+
+## T4 — Make shell execution bounded and deadlock-resistant
+
+**Why:** `runShell` drains stdout to EOF before reading stderr. A child filling stderr can block while stdout remains open. Output is fully buffered before truncation. The watchdog targets only the shell PID, so descendants holding pipes open can outlive the deadline.
+
+**Files:** `Sources/HarnessCore/Tools.swift`, new `Sources/HarnessCore/ShellRunner.swift`, new `Tests/HarnessTests/ShellRunnerTests.swift`; package changes only if required for portable POSIX interop.
+
+**Implementation:**
+1. Extract process launch, capture, and timeout handling into `ShellRunner`; keep `Tools.runShell` as the compatibility wrapper.
+2. Drain stdout and stderr concurrently. Preserve separate stdout/stderr sections; do not promise ordering between them.
+3. Retain at most 64 KiB per stream, continuing to drain and discard overflow. Report discarded byte counts. Keep the agent's existing character-based context truncation as an additional layer.
+4. Launch the shell in a dedicated process group using portable POSIX spawn attributes, not a racy post-launch group assignment. Preserve the OS shell choice and `-lc` arguments.
+5. Track timeout explicitly. On deadline, send SIGTERM to the owned group, then SIGKILL after 500 ms. Coordinate readers and child reaping; stop watchdog work when the run is complete and never signal the harness's group.
+6. Bound the final pipe-drain wait after timeout and close remaining readers if necessary. An escaped/detached descendant must not indefinitely block the tool, though killing deliberately escaped descendants is not guaranteed.
+7. Remove the duplicate `process.arguments` assignment as part of replacing the launch path.
+
+**Acceptance tests:**
+- A command writing over 1 MiB to stderr before closing stdout finishes successfully, without waiting for its timeout.
+- Large stdout and stderr are drained with bounded retained output and explicit truncation counts.
+- A shell waiting on a sleeping child returns within a generous timeout-plus-cleanup bound; the ordinary child process is no longer alive.
+- SIGTERM-resistant commands reach the SIGKILL path; normal completion never reports a timeout.
+- Nonzero exit codes, empty output, invalid cwd, and invalid UTF-8 have deterministic reports.
+- Test fixtures use system shell utilities only and have external hard deadlines so a regression cannot hang CI. Run on both existing macOS/Linux CI jobs.
+
+**Out of scope:** interactive terminals, full sandboxing, daemon supervision, user-initiated cancellation UI.
+
+## T5 — Recover failed tasks without replaying completed tool actions
+
+**Why:** `/retry` works only when the last message is a user message. After a successful tool execution followed by a model failure or turn-cap error, the transcript ends in a tool result and retry reports “nothing to retry.” Autosave currently runs only after success, and `--once` catches failures without a failing process exit.
+
+**Files:** `Sources/HarnessCore/Agent.swift`, `Sources/HarnessCore/Session.swift`, `Sources/harness/Harness.swift`, new `Tests/HarnessTests/RecoveryTests.swift`; a small HarnessCore task-controller type if needed to keep CLI behavior testable.
+
+**Implementation:**
+1. Split appending a new user task from continuing the existing agent loop. Keep `run(task:messages:)` as the public convenience entry point.
+2. Track whether the current task completed or failed in runtime state. `/retry` resumes only a failed task; it must not append the original user prompt again or replay recorded tool calls.
+3. Give explicit retries a fresh per-run turn budget. Do not add automatic network retries or replay partially streamed output as transcript messages.
+4. Attempt atomic session saving after both success and caught failure. Print an actionable warning on save failure instead of suppressing it.
+5. Make task execution return a testable outcome: `--once` exits nonzero on task failure or persistence failure; interactive mode reports the error and remains usable.
+6. Clear retry state after success, `/reset`, or `/load`. Persisting resumability across process restarts is deferred; this task saves failed transcripts for inspection but resumes only failures from the current process.
+7. Update `/help` and README recovery behavior.
+
+**Acceptance tests:**
+- Initial model failure followed by retry retains exactly one user prompt.
+- A scripted model writes a file, then fails; retry continues from the recorded tool result, and the write tool is executed exactly once.
+- Turn-cap failure can be explicitly resumed without losing tool-call/result pairing.
+- Successful completion, reset, and load do not leave stale retry state.
+- Failed task transcripts are saved; save failures are visible.
+- `--once` returns nonzero for an unreachable local endpoint and zero for a successful stub-backed controller test. No paid endpoint is used.
+- An interactive failure does not terminate the REPL.
+
+**Out of scope:** JSONL journaling, crash recovery mid-tool, exactly-once side effects across crashes.
+
+## Completion status
+
+Implemented with offline tests. Latest macOS verification: `swift test` passed (36 tests), `swift run harness --selftest` passed, and `swift build -c release` passed. An isolated `--once` run against a refused localhost endpoint returned exit status 1. Linux CI has not yet run against this worktree.
+
+## Shared completion gate
+
+For each task:
+
+```sh
+swift test
+swift run harness --selftest
+swift build -c release
+git diff --check
+```
+
+Confirm macOS and Linux CI before merging portability-sensitive changes. Do not run `--e2e` as a routine gate: it includes live provider calls. Update affected documentation in the same commit and report any pre-existing failure separately.
+
+## After these fixes
+
+The next feature candidate is a tool-approval gate, building on T3's enforced dispatch boundary. Decide interactive versus noninteractive defaults and child-agent policy inheritance before implementing it. JSONL crash recovery and an Anthropic-native client can follow separately; neither should be bundled into the correctness tasks above.

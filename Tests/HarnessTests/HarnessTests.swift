@@ -185,20 +185,34 @@ struct ProviderTests {
         #expect(intl.baseURL == "https://api.z.ai/api/coding/paas/v4")
     }
 
-    @Test("pi-stored keys are borrowed on explicit selection")
+    @Test("borrowed keys use injected snapshot with env precedence")
     func piKeyBorrowing() {
-        // Only assert when pi's auth.json is present (environment-dependent).
-        guard FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") else { return }
-        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:])
-        #expect(codingCN.apiKey != "none")
-        let deepseek = Config.resolve(arguments: ["--provider", "deepseek"], env: [:])
-        #expect(deepseek.apiKey != "none")
+        let snapshot = PIConfigSnapshot(apiKeys: ["zai-coding-cn": "cn-secret", "deepseek": "deep-secret"])
+        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:], pi: snapshot)
+        #expect(codingCN.apiKey == "cn-secret")
+        let explicit = Config.resolve(arguments: ["--provider", "deepseek"],
+                                      env: ["DEEPSEEK_API_KEY": "explicit"], pi: snapshot)
+        #expect(explicit.apiKey == "explicit")
     }
 
-    @Test("zero-setup deepseek default via borrowed pi key")
+    @Test("only DeepSeek borrowed credentials satisfy autodetect")
     func deepseekDefault() {
-        guard FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") else { return }
-        #expect(Config.resolve(arguments: [], env: [:]).provider == "deepseek")
+        let noKeys = Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot())
+        #expect(noKeys.provider == "ollama")
+        let deepseek = Config.resolve(arguments: [], env: [:],
+                                      pi: PIConfigSnapshot(apiKeys: ["deepseek": "deep-secret", "zai": "zai-secret"]))
+        #expect(deepseek.provider == "deepseek" && deepseek.apiKey == "deep-secret")
+        let openAIWins = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "open-secret"],
+                                        pi: PIConfigSnapshot(apiKeys: ["deepseek": "deep-secret"]))
+        #expect(openAIWins.provider == "openai" && openAIWins.apiKey == "open-secret")
+    }
+
+    @Test("pi auth parsing ignores OAuth, empty keys, and malformed input")
+    func piAuthParsing() {
+        let data = #"{"openai":{"type":"api_key","key":"ok"},"oauth":{"type":"oauth","key":"token"},"empty":{"type":"api_key","key":""}}"#.data(using: .utf8)!
+        #expect(parsePIAuthKeys(data) == ["openai": "ok"])
+        #expect(parsePIAuthKeys(Data("no json".utf8)).isEmpty)
+        #expect(parsePIProvider(Data("no json".utf8)) == nil)
     }
 
     @Test("wire quirks are profile data")

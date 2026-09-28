@@ -225,22 +225,19 @@ enum SelfTest {
 
         // GLM Coding Plan: opt-in endpoints (never autodetected — plan quota
         // must not be silently routed to).
-        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:])
+        let fakePi = PIConfigSnapshot(apiKeys: ["zai-coding-cn": "fake-cn-key", "deepseek": "fake-deepseek-key"])
+        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:], pi: fakePi)
         check("zai-coding-cn (CN plan) endpoint",
               codingCN.provider == "zai-coding-cn"
                   && codingCN.baseURL == "https://open.bigmodel.cn/api/coding/paas/v4"
                   && codingCN.model == "glm-5.3",
               "provider=\(codingCN.provider) model=\(codingCN.model)")
-        let codingIntl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:])
+        let codingIntl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:], pi: fakePi)
         check("zai-coding (international plan) endpoint",
               codingIntl.provider == "zai-coding"
                   && codingIntl.baseURL == "https://api.z.ai/api/coding/paas/v4",
               "provider=\(codingIntl.provider)")
-        // Key borrowing from pi's auth.json is environment-dependent: assert
-        // only when the file is actually there.
-        if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") {
-            check("zai-coding-cn borrows pi's stored key", codingCN.apiKey != "none", "apiKey=none")
-        }
+        check("zai-coding-cn borrows injected key", codingCN.apiKey == "fake-cn-key", "apiKey=\(codingCN.apiKey)")
 
         // ---- DeepSeek: provider resolution with the env key -----------------
         let deepseek = Config.resolve(arguments: [], env: ["DEEPSEEK_API_KEY": "sk-test"])
@@ -249,14 +246,10 @@ enum SelfTest {
                   && deepseek.model == "deepseek-flash",
               "provider=\(deepseek.provider) model=\(deepseek.model)")
 
-        // DeepSeek's borrowed key also satisfies AUTODETECT (shipped
-        // zero-setup default) — gated on pi's auth.json actually existing,
-        // since the borrow reads from it.
-        if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.pi/agent/auth.json") {
-            let borrowedDefault = Config.resolve(arguments: [], env: [:])
-            check("deepseek default via borrowed pi key",
-                  borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
-        }
+        // DeepSeek alone permits its injected borrowed key to satisfy autodetect.
+        let borrowedDefault = Config.resolve(arguments: [], env: [:], pi: fakePi)
+        check("deepseek default via borrowed pi key",
+              borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
 
         // ---- provider quirks are data on the profile (modular config) ------
         let openaiQuirks = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"])
@@ -396,13 +389,15 @@ enum SelfTest {
                 apiKey: "none", model: "launch-model")
             var loadAgent = Agent(config: loadConfig, model: OpenAICompatClient(config: loadConfig))
             var loadMessages: [Message] = [.system("sys")]
+            var retryAvailable = false
 
             // Endpoint mismatch: the session's model must NOT be applied.
             let elsewhere = Session(
                 model: "some-other-model", provider: "somewhere-else",
                 baseURL: "https://other.example.com/v1", messages: [.user("hi")])
             try elsewhere.save(to: URL(fileURLWithPath: sessionPath))
-            await HarnessMain.handleCommand("/load \(sessionPath)", &loadAgent, &loadMessages)
+            await HarnessMain.handleCommand("/load \(sessionPath)", &loadAgent, &loadMessages,
+                                           retryAvailable: &retryAvailable)
             check("/load keeps launch model on endpoint mismatch",
                   loadAgent.config.model == "launch-model", loadAgent.config.model)
             check("/load restored the conversation",
@@ -415,7 +410,8 @@ enum SelfTest {
                 model: "same-model", provider: "stub",
                 baseURL: "https://launch.example.com/v1", messages: [.user("hi")])
             try sameEndpoint.save(to: URL(fileURLWithPath: sessionPath))
-            await HarnessMain.handleCommand("/load \(sessionPath)", &loadAgent, &loadMessages)
+            await HarnessMain.handleCommand("/load \(sessionPath)", &loadAgent, &loadMessages,
+                                           retryAvailable: &retryAvailable)
             check("/load restores model on endpoint match",
                   loadAgent.config.model == "same-model", loadAgent.config.model)
         } catch {

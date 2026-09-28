@@ -95,12 +95,6 @@ public struct ProviderProfile: Sendable {
         envKeys.compactMap { env[$0] }.first
     }
 
-    /// Key borrowed from pi's stored auth, when this profile's policy
-    /// borrows at all.
-    public func borrowedKey() -> String? {
-        guard let entry = keyResolution.borrowEntry else { return nil }
-        return piAuthApiKey(entry)
-    }
 }
 
 public extension Config {
@@ -183,36 +177,67 @@ public extension Config {
 // pi fallbacks — reusing credentials/config this machine already has.
 // ---------------------------------------------------------------------------
 
-/// API key stored by pi in ~/.pi/agent/auth.json for a provider, if present.
-/// Only "api_key"-typed entries are used (OAuth tokens are not plain keys).
-func piAuthApiKey(_ provider: String) -> String? {
-    let path = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".pi/agent/auth.json")
-    guard let data = try? Data(contentsOf: path),
-          let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
-          let entry = root.objectValue?[provider]?.objectValue else { return nil }
-    let type = entry["type"]?.stringValue ?? ""
-    let key = entry["key"]?.stringValue ?? ""
-    return type.lowercased() == "api_key" && !key.isEmpty ? key : nil
+/// Immutable inputs loaded from pi's config files. Inject this into resolution
+/// tests so they never read the developer's home directory or real secrets.
+public struct PIConfigSnapshot: Sendable {
+    public var provider: PIProvider?
+    public var apiKeys: [String: String]
+
+    public init(provider: PIProvider? = nil, apiKeys: [String: String] = [:]) {
+        self.provider = provider
+        self.apiKeys = apiKeys
+    }
+
+    public static func loadFromHome() -> PIConfigSnapshot {
+        PIConfigSnapshot(provider: loadProvider(), apiKeys: loadAPIKeys())
+    }
+
+    public func borrowedKey(for profile: ProviderProfile) -> String? {
+        guard let entry = profile.keyResolution.borrowEntry,
+              let key = apiKeys[entry], !key.isEmpty else { return nil }
+        return key
+    }
 }
 
-/// Provider borrowed from pi's ~/.pi/agent/models.json, if present. Lets the
-/// harness reuse whatever provider this machine already configured for pi.
-public struct PIProvider {
+public struct PIProvider: Sendable {
     public var name: String
     public var baseURL: String
     public var apiKey: String
     public var model: String
+
+    public init(name: String, baseURL: String, apiKey: String, model: String) {
+        self.name = name
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.model = model
+    }
 }
 
-func piProviderConfig() -> PIProvider? {
-    let path = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".pi/agent/models.json")
-    guard let data = try? Data(contentsOf: path),
-          let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
-          let providers = root.objectValue?["providers"]?.objectValue else { return nil }
+func parsePIAuthKeys(_ data: Data) -> [String: String] {
+    guard let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? "")?.objectValue else { return [:] }
+    return root.compactMapValues { value in
+        guard let entry = value.objectValue,
+              entry["type"]?.stringValue?.lowercased() == "api_key",
+              let key = entry["key"]?.stringValue, !key.isEmpty else { return nil }
+        return key
+    }
+}
 
-    // Pick the first provider whose id doesn't start with "orca".
+func loadAPIKeys() -> [String: String] {
+    let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/auth.json")
+    guard let data = try? Data(contentsOf: path) else { return [:] }
+    return parsePIAuthKeys(data)
+}
+
+func loadProvider() -> PIProvider? {
+    let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/models.json")
+    guard let data = try? Data(contentsOf: path) else { return nil }
+    return parsePIProvider(data)
+}
+
+func parsePIProvider(_ data: Data) -> PIProvider? {
+    guard let root = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
+          let providers = root.objectValue?["providers"]?.objectValue else { return nil }
     let name = providersKey(providers) ?? "ollama"
     guard let provider = providers[name]?.objectValue,
           let base = provider["baseUrl"]?.stringValue else { return nil }

@@ -12,7 +12,7 @@ import Foundation
 //   1. hardcoded default (local Ollama)
 //   2. pi's ~/.pi/agent/models.json (reuse a provider this machine has)
 //   3. provider catalog via --provider flag (may borrow a pi-stored key)
-//   4. autodetect: first profile in autodetectOrder with an env key
+//   4. autodetect: env keys first; DeepSeek may use its opted-in borrowed key
 //   5. environment variables (HARNESS_BASE_URL / HARNESS_API_KEY / …)
 //   6. command-line flags (--base-url/--api-key/--model/--reasoning)
 //
@@ -101,6 +101,14 @@ public struct Config: Sendable {
     /// Injectable-environment variant so the selftest can verify provider
     /// selection without touching real secrets.
     public static func resolve(arguments: [String], env: [String: String]) -> Config {
+        resolve(arguments: arguments, env: env, pi: .loadFromHome())
+    }
+
+    /// Pure resolution entry point. No filesystem access occurs when the
+    /// snapshot is supplied, which makes precedence deterministic in tests.
+    public static func resolve(
+        arguments: [String], env: [String: String], pi: PIConfigSnapshot
+    ) -> Config {
         var config = Config(
             provider: "ollama",
             baseURL: "http://127.0.0.1:11434/v1",
@@ -109,22 +117,23 @@ public struct Config: Sendable {
         )
 
         // 2. Borrow provider config from pi, if present.
-        if let pi = piProviderConfig() {
-            config = Config(provider: "pi", baseURL: pi.baseURL, apiKey: pi.apiKey, model: pi.model)
+        if let borrowedProvider = pi.provider {
+            config = Config(provider: "pi", baseURL: borrowedProvider.baseURL,
+                            apiKey: borrowedProvider.apiKey, model: borrowedProvider.model)
             // The borrowed provider may be the local Ollama proxy, which
             // accepts stream_options (it IS the Ollama server).
-            config.streamOptions = pi.baseURL.contains("11434")
+            config.streamOptions = borrowedProvider.baseURL.contains("11434")
         }
 
         // 3. Provider catalog. --provider X wins; otherwise the first profile
         // in autodetectOrder with an API key in the environment wins.
-        // Autodetect uses ENV KEYS ONLY: a pi-stored borrowed key must never
-        // outrank an explicit env key or silently move the default to a paid
-        // cloud API. Borrowing applies when the user names the provider.
+        // Autodetect checks env keys first, so a borrowed key never outranks
+        // an explicit env key. DeepSeek alone opts into a borrowed-key fallback;
+        // other profiles borrow only when explicitly selected.
         let requested = flagValue("--provider", in: arguments)
         if let name = requested ?? env["HARNESS_PROVIDER"], let profile = Config.catalog[name.lowercased()] {
             config = apply(profile, env)
-            config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey)
+            config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey, pi: pi)
         } else if requested == nil && env["HARNESS_PROVIDER"] == nil {
             // Two passes, so priority is by KEY KIND, not catalog position:
             //   pass 1 — explicit env keys ALWAYS beat borrowed keys
@@ -137,7 +146,7 @@ public struct Config: Sendable {
             for name in Config.autodetectOrder {
                 guard let profile = Config.catalog[name], profile.key(in: env) != nil else { continue }
                 config = apply(profile, env)
-                config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey)
+                config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey, pi: pi)
                 matched = true
                 break
             }
@@ -145,9 +154,9 @@ public struct Config: Sendable {
                 for name in Config.autodetectOrder {
                     guard let profile = Config.catalog[name],
                           profile.keyResolution.borrowsForAutodetect,
-                          profile.borrowedKey() != nil else { continue }
+                          pi.borrowedKey(for: profile) != nil else { continue }
                     config = apply(profile, env)
-                    config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey)
+                    config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey, pi: pi)
                     break
                 }
             }
@@ -204,10 +213,11 @@ public struct Config: Sendable {
     /// Key resolution for one profile: env keys first; then the profile's
     /// own policy decides whether a pi-stored key may be borrowed.
     private static func resolvedKey(
-        profile: ProviderProfile, env: [String: String], current: String
+        profile: ProviderProfile, env: [String: String], current: String,
+        pi: PIConfigSnapshot
     ) -> String {
         if let envKey = profile.key(in: env) { return envKey }
-        return profile.borrowedKey() ?? current
+        return pi.borrowedKey(for: profile) ?? current
     }
 
     private static func flagValue(_ flag: String, in arguments: [String]) -> String? {
