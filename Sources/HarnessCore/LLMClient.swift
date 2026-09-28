@@ -40,7 +40,7 @@ public extension ChatModel {
     /// piece. Conformers get streaming for free; override it only when the
     /// provider actually supports SSE. (The stub model in the e2e suite uses
     /// exactly this fallback.)
-    public func stream(
+    func stream(
         _ messages: [Message],
         tools: [ToolSpec],
         onText: @Sendable (String) -> Void
@@ -345,12 +345,12 @@ public extension OpenAICompatClient {
     /// remedy (retry with reasoning_effort "none") applies. Seen on
     /// gpt-5.6-luna: "Function tools with reasoning_effort are not supported
     /// in /v1/chat/completions … set reasoning_effort to 'none'".
-    public static func isReasoningToolConflict(_ error: LLMError) -> Bool {
+    static func isReasoningToolConflict(_ error: LLMError) -> Bool {
         error.status == 400 && error.body.contains("reasoning_effort")
     }
 
     /// Guard for the one-shot self-healing retry.
-    public static func shouldRetryWithNone(
+    static func shouldRetryWithNone(
         _ error: LLMError, attempt: Int, sentEffort: Bool
     ) -> Bool {
         attempt == 0 && sentEffort && isReasoningToolConflict(error)

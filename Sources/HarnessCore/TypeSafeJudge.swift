@@ -1,5 +1,4 @@
 import Foundation
-import HarnessCore
 
 // ---------------------------------------------------------------------------
 // TypeSafeJudge.swift — the `judge` tool.

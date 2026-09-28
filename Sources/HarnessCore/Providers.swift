@@ -100,7 +100,7 @@ public struct ProviderProfile: Sendable {
 public extension Config {
     /// The well-known provider catalog. All of these speak the OpenAI
     /// Chat Completions dialect, so one client covers them all.
-    public static let catalog: [String: ProviderProfile] = [
+    static let catalog: [String: ProviderProfile] = [
         "openai": ProviderProfile(
             name: "openai",
             baseURL: "https://api.openai.com/v1",
@@ -170,7 +170,7 @@ public extension Config {
     /// Provider ids checked, in order, when no --provider flag is given:
     /// the first one with an API key in the environment wins. Coding-plan
     /// profiles are deliberately absent — their quota is opt-in only.
-    public static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
+    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
 }
 
 // ---------------------------------------------------------------------------

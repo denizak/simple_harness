@@ -54,7 +54,7 @@ public struct Session: Codable, Sendable {
 public extension Agent {
     /// Persist the conversation alongside its model identity so /load can
     /// restore the exact configuration the session ran with.
-    public func saveSession(messages: [Message], to url: URL? = nil) throws {
+    func saveSession(messages: [Message], to url: URL? = nil) throws {
         try Session(
             model: config.model, provider: config.provider,
             baseURL: config.baseURL, messages: messages
