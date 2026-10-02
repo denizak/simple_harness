@@ -69,23 +69,35 @@ swift_ok() {
 }
 
 # Map the running distro to Swift's published build (see swift.org/install).
+# swift.org uses two names per platform: `slug` (the URL directory) and `full`
+# (the tarball name). They differ for Ubuntu — the directory is "ubuntu2404"
+# while the file is "swift-…-ubuntu24.04.tar.gz". The RHEL/CentOS/AlmaLinux/
+# Rocky/Oracle 9 family is published as "ubi9" (Red Hat UBI 9); there is no
+# "rhel9" download on swift.org.
 detect_platform() {
     . /etc/os-release 2>/dev/null || true
     local id="${ID:-}" version="${VERSION_ID:-}"
     case "${id}:${version}" in
-        rhel:9*|centos:9*|almalinux:9*|rocky:9*|ol:9*)  platform="rhel9" ;;
-        ubuntu:24.*|pop:24.*)                          platform="ubuntu2404" ;;
-        ubuntu:22.*|debian:*|pop:22.*)                 platform="ubuntu2204" ;;
-        *)                                             platform="ubuntu2404" ;;
+        rhel:9*|centos:9*|almalinux:9*|rocky:9*|ol:9*|ubi:9*)
+            slug="ubi9"; full="ubi9" ;;
+        ubuntu:24.*|pop:24.*)
+            slug="ubuntu2404"; full="ubuntu24.04" ;;
+        ubuntu:22.*|debian:*|pop:22.*)
+            slug="ubuntu2204"; full="ubuntu22.04" ;;
+        *)
+            slug="ubuntu2404"; full="ubuntu24.04" ;;
     esac
 }
 
 install_swift() {
-    local arch platform dest="$HOME/.swift"
+    local arch archsuffix slug full dest="$HOME/.swift"
     arch="$(uname -m)"
+    # swift.org suffixes arm64 Linux builds with "-aarch64"; x86_64 has no suffix.
+    archsuffix=""
+    [ "$arch" = "aarch64" ] && archsuffix="-aarch64"
     detect_platform
-    local url="https://download.swift.org/swift-${SWIFT_VERSION_TO_INSTALL}-release/${platform}/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE-${platform}.${arch}.tar.gz"
-    log "Downloading Swift $SWIFT_VERSION_TO_INSTALL ($platform.$arch) → $dest"
+    local url="https://download.swift.org/swift-${SWIFT_VERSION_TO_INSTALL}-release/${slug}${archsuffix}/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE-${full}${archsuffix}.tar.gz"
+    log "Downloading Swift $SWIFT_VERSION_TO_INSTALL (${slug}${archsuffix}) → $dest"
     $SUDO mkdir -p "$dest"
     curl -fL "$url" | $SUDO tar xz -C "$dest"
     export PATH="$dest/usr/bin:$PATH"
