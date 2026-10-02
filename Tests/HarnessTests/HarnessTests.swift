@@ -257,6 +257,117 @@ struct TypeSafeTests {
     }
 }
 
+@Suite("pre-model gate")
+struct GateTests {
+    @Test("decision rule: below threshold rejects, at-or-above proceeds")
+    func decisionRule() {
+        #expect(ModelGate.decide(noulProbability: 0.49, threshold: 0.5) != nil)
+        #expect(ModelGate.decide(noulProbability: 0.5, threshold: 0.5) == nil)
+        #expect(ModelGate.decide(noulProbability: 0.95, threshold: 0.5) == nil)
+    }
+
+    @Test("gate question is a well-formed noul ask")
+    func questionShape() {
+        #expect(ModelGate.question.type == "noul")
+        let request = TypeSafeClient.request(state: "fix the build", questions: [ModelGate.question])
+        #expect(request.objectValue?["questions"]?.objectValue?["proceed"]?
+            .objectValue?["type"]?.stringValue == "noul")
+    }
+
+    @Test("gate config: opt-in flag and threshold bounds via env")
+    func configResolution() {
+        let off = Config.resolve(arguments: [], env: ["TYPESAFE_API_KEY": "k"])
+        #expect(!off.gateEnabled)
+        let on = Config.resolve(arguments: [], env: ["TYPESAFE_API_KEY": "k", "HARNESS_GATE": "1"])
+        #expect(on.gateEnabled)
+        #expect(on.gateThreshold == 0.5)
+        let tuned = Config.resolve(arguments: [],
+                                   env: ["HARNESS_GATE": "yes", "HARNESS_GATE_THRESHOLD": "0.8"])
+        #expect(tuned.gateEnabled)
+        #expect(tuned.gateThreshold == 0.8)
+        // Out-of-range thresholds fall back to the default rather than
+        // creating an always-reject (0) or always-proceed (>=1) gate.
+        let bogus = Config.resolve(arguments: [], env: ["HARNESS_GATE": "1", "HARNESS_GATE_THRESHOLD": "1.5"])
+        #expect(bogus.gateThreshold == 0.5)
+    }
+}
+
+@Suite("JSON config file")
+struct ConfigFileTests {
+    private let entries: [String: JSONValue] = [
+        "provider": .string("zai-coding"),
+        "baseURL": .string("https://file.example/v1"),
+        "apiKey": .string("file-key"),
+        "model": .string("file-model"),
+        "maxTurns": .number(7),
+        "compactKeepTail": .number(1),
+        "streaming": .bool(false),
+        "gate": .bool(true),
+        "gateThreshold": .number(0.8),
+        "typesafeApiKey": .string("ts-key"),
+        "unknownKey": .string("ignored"),
+    ]
+
+    @Test("file values apply; env overrides file; flags override env")
+    func precedence() {
+        let base = Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot(), file: entries)
+        #expect(base.baseURL == "https://file.example/v1")
+        #expect(base.model == "file-model")
+        #expect(base.maxTurns == 7)
+        #expect(base.compactKeepTail == 2)  // clamped like the env path
+        #expect(!base.streaming)
+        #expect(base.gateEnabled)
+        #expect(base.gateThreshold == 0.8)
+        #expect(base.typesafeApiKey == "ts-key")
+
+        let envWins = Config.resolve(arguments: [], env: ["HARNESS_MODEL": "env-model"],
+                                     pi: PIConfigSnapshot(), file: entries)
+        #expect(envWins.model == "env-model")
+
+        let flagWins = Config.resolve(arguments: ["--model", "flag-model"],
+                                      env: ["HARNESS_MODEL": "env-model"],
+                                      pi: PIConfigSnapshot(), file: entries)
+        #expect(flagWins.model == "flag-model")
+    }
+
+    @Test("file provider selects a catalog profile; --provider outranks it")
+    func providerSelection() {
+        let fromFile = Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot(), file: entries)
+        #expect(fromFile.provider == "zai-coding")
+
+        let flagBeatsFile = Config.resolve(arguments: ["--provider", "openai"],
+                                           env: [:], pi: PIConfigSnapshot(), file: entries)
+        #expect(flagBeatsFile.provider == "openai")
+        // The profile supplies endpoint/quirks, but the file's scalar values
+        // (applied after catalog selection) still customize on top of it.
+        #expect(flagBeatsFile.model == "file-model")
+    }
+
+    @Test("suppressed file loading keeps resolution deterministic")
+    func noFileByDefault() {
+        let plain = Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot())
+        #expect(plain.model != "file-model")
+    }
+
+    @Test("flags override file values for gate and runtime settings")
+    func flagOverrides() {
+        let file: [String: JSONValue] = [
+            "gate": .bool(true), "gateThreshold": .number(0.8),
+            "streaming": .bool(true), "maxTurns": .number(7),
+        ]
+        let off = Config.resolve(arguments: ["--no-gate", "--no-streaming", "--max-turns", "3"],
+                                 env: [:], pi: PIConfigSnapshot(), file: file)
+        #expect(!off.gateEnabled)
+        #expect(!off.streaming)
+        #expect(off.maxTurns == 3)
+
+        let tuned = Config.resolve(arguments: ["--gate-threshold", "0.6"],
+                                   env: [:], pi: PIConfigSnapshot(), file: file)
+        #expect(tuned.gateEnabled)  // from file
+        #expect(tuned.gateThreshold == 0.6)
+    }
+}
+
 @Suite("reasoning_effort quirk")
 struct ReasoningTests {
     @Test("override lands in the body; absent by default")

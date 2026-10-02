@@ -75,6 +75,14 @@ struct HarnessMain {
                   --model ID        model id override
                   --base-url URL    API endpoint override (OpenAI-compatible /chat/completions)
                   --api-key KEY     API key override
+                  --config PATH     JSON config file (default ./.simple.h.conf;
+                                    env HARNESS_CONFIG; env vars and flags still win)
+                  --gate            enable the pre-model gate (TypeSafe; needs TYPESAFE_API_KEY)
+                  --no-gate         disable it (overrides file/env)
+                  --gate-threshold P   minimum proceed probability (0..<1, default 0.5)
+                  --no-streaming    disable SSE streaming
+                  --max-turns N     turn cap per task (default 25)
+                  --typesafe-key KEY   TypeSafe API key override
                   --once TASK       run one task non-interactively (nonzero exit on failure)
                   --reasoning EFF   reasoning effort for thinking models (none|low|medium|high|max)
                   --selftest        exercise the tool layer without any API call

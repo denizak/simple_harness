@@ -79,6 +79,14 @@ public struct Agent {
     /// until the model answers with plain text (or the turn cap is hit).
     /// Mutates `messages` in place so the REPL can persist the session.
     public mutating func run(task input: String, messages: inout [Message]) async throws {
+        // ---- Pre-model gate (once per task, not per turn) ----------------
+        // A rejected request never reaches the model OR the history, so a
+        // blocked task leaves nothing to /retry. Fail-open: check() returns
+        // nil on every error path.
+        if let rejection = await ModelGate.check(input: input, config: config) {
+            print(AgentUI.warn("[gate] task rejected — \(rejection)"))
+            return
+        }
         messages.append(.user(input))
         try await continueRun(messages: &messages)
     }

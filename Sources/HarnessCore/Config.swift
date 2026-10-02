@@ -48,6 +48,11 @@ public struct Config: Sendable {
     /// TypeSafe API key (https://docs.typesafe.ai) — powers the `judge` tool.
     /// Read from the environment; optional — the tool reports its absence.
     public var typesafeApiKey: String?
+    /// Pre-model gate (Gate.swift): judge each user task with TypeSafe before
+    /// the first model call; reject below `gateThreshold`. Fail-open.
+    public var gateEnabled: Bool = false
+    /// Minimum "proceed" probability for the gate to let a task through.
+    public var gateThreshold: Double = 0.5
     /// Wire-format quirk resolved from the provider profile: which
     /// token-limit field the server accepts ("max_tokens" or, for newer
     /// OpenAI models, "max_completion_tokens").
@@ -74,6 +79,8 @@ public struct Config: Sendable {
         reasoningEffort: String? = nil,
         maxAgentDepth: Int = 2,
         typesafeApiKey: String? = nil,
+        gateEnabled: Bool = false,
+        gateThreshold: Double = 0.5,
         tokenLimitKey: String = "max_tokens",
         streamOptions: Bool = false
     ) {
@@ -90,6 +97,8 @@ public struct Config: Sendable {
         self.reasoningEffort = reasoningEffort
         self.maxAgentDepth = maxAgentDepth
         self.typesafeApiKey = typesafeApiKey
+        self.gateEnabled = gateEnabled
+        self.gateThreshold = gateThreshold
         self.tokenLimitKey = tokenLimitKey
         self.streamOptions = streamOptions
     }
@@ -101,13 +110,16 @@ public struct Config: Sendable {
     /// Injectable-environment variant so the selftest can verify provider
     /// selection without touching real secrets.
     public static func resolve(arguments: [String], env: [String: String]) -> Config {
-        resolve(arguments: arguments, env: env, pi: .loadFromHome())
+        resolve(arguments: arguments, env: env, pi: .loadFromHome(), file: nil)
     }
 
     /// Pure resolution entry point. No filesystem access occurs when the
     /// snapshot is supplied, which makes precedence deterministic in tests.
+    /// `file: nil` means "read the JSON config file from disk"; passing `[:]`
+    /// (the default here) suppresses file loading entirely for tests.
     public static func resolve(
-        arguments: [String], env: [String: String], pi: PIConfigSnapshot
+        arguments: [String], env: [String: String], pi: PIConfigSnapshot,
+        file: [String: JSONValue]? = [:]
     ) -> Config {
         var config = Config(
             provider: "ollama",
@@ -125,12 +137,21 @@ public struct Config: Sendable {
             config.streamOptions = borrowedProvider.baseURL.contains("11434")
         }
 
+        // 2.5 JSON config file. Path: --config flag > HARNESS_CONFIG env >
+        // .simple.h.conf in the working directory (missing default file is
+        // normal, silent). A file "provider" participates in catalog
+        // selection below, but env and --provider outrank it.
+        let fileEntries = file ?? configFileEntries(
+            explicitPath: flagValue("--config", in: arguments), env: env)
+
         // 3. Provider catalog. --provider X wins; otherwise the first profile
         // in autodetectOrder with an API key in the environment wins.
         // Autodetect checks env keys first, so a borrowed key never outranks
         // an explicit env key. DeepSeek alone opts into a borrowed-key fallback;
         // other profiles borrow only when explicitly selected.
         let requested = flagValue("--provider", in: arguments)
+            ?? env["HARNESS_PROVIDER"]
+            ?? fileEntries["provider"]?.stringValue
         if let name = requested ?? env["HARNESS_PROVIDER"], let profile = Config.catalog[name.lowercased()] {
             config = apply(profile, env)
             config.apiKey = resolvedKey(profile: profile, env: env, current: config.apiKey, pi: pi)
@@ -162,6 +183,12 @@ public struct Config: Sendable {
             }
         }
 
+        // 3.5 Remaining JSON config file values. Known keys only, each
+        // optional; env overrides (step 4) and flags (step 5) still win.
+        if !fileEntries.isEmpty {
+            applyFileEntries(fileEntries, to: &config)
+        }
+
         // 4. Environment overrides.
         if let value = env["HARNESS_BASE_URL"] { config.baseURL = value }
         if let value = env["HARNESS_API_KEY"] { config.apiKey = value }
@@ -179,8 +206,17 @@ public struct Config: Sendable {
         if let value = env["HARNESS_REASONING"], !value.isEmpty {
             config.reasoningEffort = value
         }
-        // Optional integrations (nil when unset).
-        config.typesafeApiKey = env["TYPESAFE_API_KEY"]
+        // Optional integrations (nil when unset — but only when env is unset,
+        // so a config-file value survives; later sources must not clobber it).
+        if let value = env["TYPESAFE_API_KEY"] { config.typesafeApiKey = value }
+        if let value = env["HARNESS_GATE"],
+           ["1", "true", "yes", "on"].contains(value.lowercased()) {
+            config.gateEnabled = true
+        }
+        if let value = env["HARNESS_GATE_THRESHOLD"], let parsed = Double(value),
+           parsed > 0, parsed < 1 {
+            config.gateThreshold = parsed
+        }
 
         // 5. Explicit flags always win: --base-url/--api-key/--model/--reasoning.
         var iterator = arguments.makeIterator()
@@ -193,6 +229,18 @@ public struct Config: Sendable {
             config.baseURL = value("--base-url", config.baseURL) ?? config.baseURL
             config.apiKey = value("--api-key", config.apiKey) ?? config.apiKey
             config.reasoningEffort = value("--reasoning", config.reasoningEffort) ?? config.reasoningEffort
+            config.typesafeApiKey = value("--typesafe-key", config.typesafeApiKey) ?? config.typesafeApiKey
+            if let raw = value("--max-turns", nil), let parsed = Int(raw), parsed > 0 {
+                config.maxTurns = parsed
+            }
+            if let raw = value("--gate-threshold", nil), let parsed = Double(raw),
+               parsed > 0, parsed < 1 {
+                config.gateThreshold = parsed
+            }
+            // Presence flags for the settings a one-off run most often flips.
+            if arguments.contains("--gate") { config.gateEnabled = true }
+            if arguments.contains("--no-gate") { config.gateEnabled = false }
+            if arguments.contains("--no-streaming") { config.streaming = false }
         }
         return config
     }
@@ -223,5 +271,56 @@ public struct Config: Sendable {
     private static func flagValue(_ flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
+    }
+
+    /// Locate and parse the JSON config file, if any. A missing DEFAULT file
+    /// is normal and silent; an explicit path (--config / HARNESS_CONFIG) that
+    /// can't be read or parsed warns and continues — the file is a
+    /// convenience, not a dependency.
+    private static func configFileEntries(
+        explicitPath: String?, env: [String: String]
+    ) -> [String: JSONValue] {
+        let path: String
+        let explicit: Bool
+        if let explicitPath {
+            path = explicitPath; explicit = true
+        } else if let fromEnv = env["HARNESS_CONFIG"] {
+            path = fromEnv; explicit = true
+        } else {
+            path = FileManager.default.currentDirectoryPath + "/.simple.h.conf"
+            explicit = false
+        }
+        guard let data = FileManager.default.contents(atPath: path) else {
+            if explicit { print(AgentUI.warn("config file not found at \(path) — ignoring")) }
+            return [:]
+        }
+        guard let parsed = JSONValue.parse(String(data: data, encoding: .utf8) ?? ""),
+              let entries = parsed.objectValue else {
+            print(AgentUI.warn("config file at \(path) is not a JSON object — ignoring"))
+            return [:]
+        }
+        return entries
+    }
+
+    /// Overlay a parsed config file onto the config. Only keys actually
+    /// present change anything; unknown keys are ignored. "provider" is
+    /// consumed earlier (catalog selection) and intentionally not re-read.
+    private static func applyFileEntries(_ entries: [String: JSONValue], to config: inout Config) {
+        func string(_ key: String) -> String? { entries[key]?.stringValue }
+        if let value = string("baseURL") { config.baseURL = value }
+        if let value = string("apiKey") { config.apiKey = value }
+        if let value = string("model") { config.model = value }
+        if let value = entries["maxTurns"]?.intValue { config.maxTurns = value }
+        if let value = entries["maxToolOutput"]?.intValue { config.maxToolOutput = value }
+        if let value = entries["compactAboveBytes"]?.intValue { config.compactAboveBytes = value }
+        if let value = entries["compactKeepTail"]?.intValue { config.compactKeepTail = max(2, value) }
+        if let value = entries["maxAgentDepth"]?.intValue { config.maxAgentDepth = value }
+        if let value = entries["streaming"]?.boolValue { config.streaming = value }
+        if let value = string("reasoningEffort") { config.reasoningEffort = value }
+        if let value = string("typesafeApiKey") { config.typesafeApiKey = value }
+        if let value = entries["gate"]?.boolValue { config.gateEnabled = value }
+        if let value = entries["gateThreshold"]?.doubleValue, value > 0, value < 1 {
+            config.gateThreshold = value
+        }
     }
 }

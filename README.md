@@ -114,6 +114,11 @@ export OLLAMA_API_KEY=...
 
 Environment overrides: `HARNESS_BASE_URL`, `HARNESS_API_KEY`, `HARNESS_MODEL`,
 `HARNESS_PROVIDER`, `HARNESS_COMPACT_BYTES`, `HARNESS_COMPACT_KEEP_TAIL`.
+A JSON config file (`--config PATH`, `HARNESS_CONFIG`, or by default
+`.simple.h.conf` in the working directory) can hold the same values — `provider`, `baseURL`,
+`apiKey`, `model`, `maxTurns`, `streaming`, `reasoningEffort`, `gate`,
+`gateThreshold`, `typesafeApiKey`, … as a top-level JSON object. Precedence:
+flags > environment > config file > defaults.
 If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
 `/models` lists what the current provider offers.

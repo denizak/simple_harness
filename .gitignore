@@ -4,4 +4,4 @@
 .swiftpm/
 *.o
 *.linkfile
-build/
+build/.simple.h.conf
