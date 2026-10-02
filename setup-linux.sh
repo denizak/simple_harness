@@ -89,6 +89,19 @@ detect_platform() {
     esac
 }
 
+# Move a Swift tree's `usr/` directory to the canonical $dest/usr, whichever
+# layout the tarball used. Older tarballs unpack straight to usr/; newer ones
+# (e.g. swift-6.2.1-RELEASE-ubi9) add a top-level version directory, so a naive
+# extract lands at $dest/swift-6.2.1-RELEASE-ubi9/usr instead of $dest/usr.
+normalize_swift() {
+    local dest="$1" root="$2"
+    [ "$root" = "$dest" ] && return 0
+    log "Normalizing Swift layout → $dest/usr"
+    $SUDO rm -rf "$dest/usr"
+    $SUDO mv "$root/usr" "$dest/usr"
+    $SUDO rmdir "$root" 2>/dev/null || true
+}
+
 install_swift() {
     local arch archsuffix slug full dest="$HOME/.swift"
     arch="$(uname -m)"
@@ -97,9 +110,36 @@ install_swift() {
     [ "$arch" = "aarch64" ] && archsuffix="-aarch64"
     detect_platform
     local url="https://download.swift.org/swift-${SWIFT_VERSION_TO_INSTALL}-release/${slug}${archsuffix}/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE-${full}${archsuffix}.tar.gz"
-    log "Downloading Swift $SWIFT_VERSION_TO_INSTALL (${slug}${archsuffix}) → $dest"
     $SUDO mkdir -p "$dest"
-    curl -fL "$url" | $SUDO tar xz -C "$dest"
+
+    # Reuse a previously extracted tree (avoids re-downloading ~1 GB) and
+    # normalize it if an earlier run left the nested tarball layout in place.
+    if [ ! -x "$dest/usr/bin/swift" ]; then
+        local existing
+        existing="$(find "$dest" -maxdepth 4 -path '*/usr/bin/swift' -print -quit 2>/dev/null || true)"
+        if [ -n "$existing" ]; then
+            log "Reusing existing Swift tree at ${existing%/usr/bin/swift}"
+            normalize_swift "$dest" "${existing%/usr/bin/swift}"
+        fi
+    fi
+
+    if [ ! -x "$dest/usr/bin/swift" ]; then
+        log "Downloading Swift $SWIFT_VERSION_TO_INSTALL (${slug}${archsuffix}) → $dest"
+        local tmp
+        tmp="$(mktemp -d)"
+        curl -fL "$url" -o "$tmp/swift.tar.gz"
+        $SUDO tar xzf "$tmp/swift.tar.gz" -C "$tmp"
+        local swift_bin root
+        swift_bin="$(find "$tmp" -maxdepth 4 -path '*/usr/bin/swift' -print -quit)"
+        if [ -z "$swift_bin" ]; then
+            rm -rf "$tmp"
+            fail "downloaded Swift tarball does not contain usr/bin/swift"
+        fi
+        root="${swift_bin%/usr/bin/swift}"
+        normalize_swift "$dest" "$root"
+        rm -rf "$tmp"
+    fi
+
     export PATH="$dest/usr/bin:$PATH"
     # Persist for future shells (bash and zsh both, whichever exists).
     local rc
