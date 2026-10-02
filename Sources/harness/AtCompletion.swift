@@ -42,7 +42,7 @@ enum AtCompletion {
     static func readLine(prompt: String) -> String? {
         guard isatty(STDIN_FILENO) == 1, enableRawMode() else {
             print(prompt, terminator: "")
-            fflush(stdout)
+            fflush(nil)  // fflush(NULL) flushes all streams; `stdout` is not concurrency-safe in Swift 6
             return Swift.readLine()
         }
         defer { disableRawMode() }

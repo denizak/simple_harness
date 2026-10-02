@@ -151,7 +151,7 @@ public struct OpenAICompatClient: ChatModel {
     ) async throws -> AssistantTurn {
         var (body, request) = try requestFor(messages: messages, tools: tools, streaming: true)
         for attempt in 0..<2 {
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let (bytes, response) = try await httpByteStream(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else {
                 var errorBody = ""
@@ -167,7 +167,7 @@ public struct OpenAICompatClient: ChatModel {
             }
 
             var assembler = SSEAssembler()
-            for try await line in bytes.lines {
+            for try await line in sseLines(from: bytes) {
                 guard line.hasPrefix("data:") else { continue }  // ignore comments/blanks
                 let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                 if payload == "[DONE]" { break }
@@ -356,3 +356,153 @@ public extension OpenAICompatClient {
         attempt == 0 && sentEffort && isReasoningToolConflict(error)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Incremental HTTP body streaming (cross-platform).
+//
+// `URLSession.bytes(for:)` / `AsyncBytes` is Apple-platform-only API; on Linux
+// swift-corelibs-foundation has no equivalent. `httpByteStream(for:)` exposes
+// ONE shape for both platforms — headers plus an `AsyncThrowingStream<UInt8>`.
+// Darwin wraps `AsyncBytes`; Linux bridges `URLSessionDataDelegate` (the only
+// incremental API corelibs-foundation offers) into the same shape. The
+// response is delivered before the body is consumed, so status checks still
+// happen up front, exactly like the Darwin path.
+// ---------------------------------------------------------------------------
+
+func httpByteStream(for request: URLRequest)
+    async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
+{
+#if canImport(Darwin)
+    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+    let stream = AsyncThrowingStream<UInt8, Error> { continuation in
+        let task = Task {
+            do {
+                for try await byte in bytes { continuation.yield(byte) }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+    }
+    return (stream, response)
+#else
+    return try await LinuxHTTPByteStream.start(request)
+#endif
+}
+
+/// Split a raw byte stream into text lines on `\n`, dropping a trailing `\r`.
+/// Stands in for `URLSession.AsyncBytes.lines`, which is Darwin-only.
+func sseLines(
+    from bytes: AsyncThrowingStream<UInt8, Error>
+) -> AsyncThrowingStream<String, Error> {
+    AsyncThrowingStream { continuation in
+        let task = Task {
+            var buffer: [UInt8] = []
+            do {
+                for try await byte in bytes {
+                    if byte == 0x0A {  // \n
+                        if buffer.last == 0x0D { buffer.removeLast() }  // \r
+                        continuation.yield(String(decoding: buffer, as: UTF8.self))
+                        buffer.removeAll(keepingCapacity: true)
+                    } else {
+                        buffer.append(byte)
+                    }
+                }
+                if !buffer.isEmpty {
+                    continuation.yield(String(decoding: buffer, as: UTF8.self))
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+    }
+}
+
+#if !canImport(Darwin)
+/// Bridges a `URLSessionDataTask` delegate stream into an `AsyncThrowingStream`
+/// of bytes — the Linux stand-in for `AsyncBytes`.
+private final class LinuxHTTPByteStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncThrowingStream<UInt8, Error>.Continuation?
+    private var responseContinuation: CheckedContinuation<(AsyncThrowingStream<UInt8, Error>, URLResponse), Error>?
+    private var byteStream: AsyncThrowingStream<UInt8, Error>?
+    private var session: URLSession?
+
+    static func start(_ request: URLRequest)
+        async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
+    {
+        try await LinuxHTTPByteStream().run(request)
+    }
+
+    private func run(_ request: URLRequest)
+        async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
+    {
+        let (stream, continuation) = AsyncThrowingStream<UInt8, Error>.makeStream()
+        lock.withLock {
+            byteStream = stream
+            self.continuation = continuation
+        }
+        // Keep this bridge alive while the stream is consumed: URLSession may
+        // hold its delegate weakly, and the delegate is what feeds the stream.
+        continuation.onTermination = { [self] _ in
+            lock.lock()
+            let session = self.session
+            self.session = nil
+            lock.unlock()
+            session?.invalidateAndCancel()
+        }
+        return try await withCheckedThrowingContinuation { responseContinuation in
+            lock.lock()
+            self.responseContinuation = responseContinuation
+            lock.unlock()
+            let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+            lock.lock()
+            self.session = session
+            lock.unlock()
+            session.dataTask(with: request).resume()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        lock.lock()
+        let responseContinuation = self.responseContinuation
+        let stream = self.byteStream
+        self.responseContinuation = nil
+        lock.unlock()
+        if let responseContinuation, let stream {
+            responseContinuation.resume(returning: (stream, response))
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        let continuation = self.continuation
+        lock.unlock()
+        guard let continuation else { return }
+        for byte in data { continuation.yield(byte) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let continuation = self.continuation
+        let responseContinuation = self.responseContinuation
+        self.continuation = nil
+        self.responseContinuation = nil
+        lock.unlock()
+        if let error {
+            responseContinuation?.resume(throwing: error)
+            continuation?.finish(throwing: error)
+        } else {
+            continuation?.finish()
+        }
+    }
+}
+#endif

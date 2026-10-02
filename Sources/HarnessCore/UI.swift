@@ -31,7 +31,7 @@ public enum AgentUI {
     /// Streaming fragment: green, no newline — the caller flushes explicitly.
     public static func printStreaming(_ fragment: String) {
         print("\(Self.green)\(fragment)\(reset)", terminator: "")
-        fflush(stdout)
+        fflush(nil)  // fflush(NULL) flushes all streams; touching `stdout` directly is not concurrency-safe in Swift 6
     }
 
     /// "→ bash {\"command\": \"ls\"}" header above each tool execution.
