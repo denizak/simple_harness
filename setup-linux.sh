@@ -68,20 +68,45 @@ swift_ok() {
     [ "${version%%.*}" -ge "$SWIFT_MAJOR_REQUIRED" ]
 }
 
+# Map the running distro to Swift's published build (see swift.org/install).
+detect_platform() {
+    . /etc/os-release 2>/dev/null || true
+    local id="${ID:-}" version="${VERSION_ID:-}"
+    case "${id}:${version}" in
+        rhel:9*|centos:9*|almalinux:9*|rocky:9*|ol:9*)  platform="rhel9" ;;
+        ubuntu:24.*|pop:24.*)                          platform="ubuntu2404" ;;
+        ubuntu:22.*|debian:*|pop:22.*)                 platform="ubuntu2204" ;;
+        *)                                             platform="ubuntu2404" ;;
+    esac
+}
+
+install_swift() {
+    local arch platform dest="$HOME/.swift"
+    arch="$(uname -m)"
+    detect_platform
+    local url="https://download.swift.org/swift-${SWIFT_VERSION_TO_INSTALL}-release/${platform}/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE/swift-${SWIFT_VERSION_TO_INSTALL}-RELEASE-${platform}.${arch}.tar.gz"
+    log "Downloading Swift $SWIFT_VERSION_TO_INSTALL ($platform.$arch) → $dest"
+    $SUDO mkdir -p "$dest"
+    curl -fL "$url" | $SUDO tar xz -C "$dest"
+    export PATH="$dest/usr/bin:$PATH"
+    # Persist for future shells (bash and zsh both, whichever exists).
+    local rc
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [ -f "$rc" ] || continue
+        grep -q '\.swift/usr/bin' "$rc" || \
+            printf '\nexport PATH="$HOME/.swift/usr/bin:$PATH"\n' >> "$rc"
+    done
+}
+
 if swift_ok; then
     log "Swift toolchain OK: $(swift --version | head -1)"
 else
     if [ "$CHECK_ONLY" = 1 ]; then
-        log "MISSING: Swift >= $SWIFT_MAJOR_REQUIRED toolchain (this script would install $SWIFT_VERSION_TO_INSTALL via swiftly)"
+        log "MISSING: Swift >= $SWIFT_MAJOR_REQUIRED toolchain (this script would install $SWIFT_VERSION_TO_INSTALL from swift.org)"
     else
-        log "Installing Swift $SWIFT_VERSION_TO_INSTALL via swiftly (Swift's official version manager)"
-        install_packages   # swiftly's dependencies first
-        curl -Os https://download.swift.org/swiftly/install.sh
-        chmod +x install.sh
-        ./install.sh --quiet --no-modify-path "swift-$SWIFT_VERSION_TO_INSTALL"
-        rm install.sh
-        export PATH="$HOME/.local/share/swiftly/bin:$PATH"
-        [ -f "$HOME/.local/share/swiftly/env.sh" ] && . "$HOME/.local/share/swiftly/env.sh"
+        log "Installing Swift $SWIFT_VERSION_TO_INSTALL from swift.org (official tarball)"
+        install_packages   # toolchain dependencies first
+        install_swift
         swift_ok || fail "swift still not usable after install — check https://www.swift.org/install/"
         log "Installed: $(swift --version | head -1)"
     fi
@@ -102,8 +127,8 @@ swift run harness --selftest >/dev/null && log "selftest passed"
 cat <<EOF
 
 [setup] Done. To use the harness from a fresh shell:
-    source ~/.local/share/swiftly/env.sh   # only if swiftly installed it
-    swift run harness                      # or: swift build -c release
+    source ~/.bashrc                        # pick up the new PATH (or reopen the shell)
+    swift run harness                       # or: swift build -c release
     ./.build/release/harness --help
 
 Then create a ./.simple.h.conf next to where you run it (see README.md) and
