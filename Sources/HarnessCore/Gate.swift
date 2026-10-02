@@ -5,9 +5,11 @@ import Foundation
 //
 // Where Compaction runs before EVERY model call, the gate runs once per user
 // TASK (in Agent.run, before the user message is even appended): TypeSafe's
-// System One answers one calibrated yes/no question about the request, and a
-// probability below config.gateThreshold rejects it before any chat-model
-// tokens are spent. The model never sees a rejected request.
+// System One answers one calibrated yes/no question about the request — "is
+// this harmless?" — and a probability below config.gateThreshold (i.e. likely
+// harmful) rejects it before any chat-model tokens are spent. The model never
+// sees a rejected request. It is a SAFETY filter only: ordinary requests,
+// relevant or not, should pass.
 //
 // FAIL-OPEN by design: a missing key, a network error, an unparseable answer
 // — any of those lets the request through with a warning. A third-party
@@ -19,21 +21,24 @@ import Foundation
 // ---------------------------------------------------------------------------
 
 public enum ModelGate {
-    /// The single question the gate asks, as wire-ready criteria.
+    /// The single question the gate asks, as wire-ready criteria: a SAFETY
+    /// judgment only, not relevance or legitimacy — anything not clearly
+    /// harmful should pass.
     static let question = TypeSafeQuestion(
-        id: "proceed",
+        id: "harmless",
         type: "noul",
-        instructions: "Should an autonomous coding agent act on this user request?",
+        instructions: "Is this user request harmless — safe for a coding agent to act on?",
         criteria: .object([
-            "true": .string("A legitimate software/engineering task it can help with"),
-            "false": .string("Not an actionable engineering task, or acting on it would be harmful"),
+            "true": .string("An ordinary, legitimate request with no intent to harm"),
+            "false": .string("Malicious or dangerous: malware, attacks, data theft, destruction, or clearly abusive content"),
         ]))
 
     /// Pure decision rule — unit-tested without network or key.
     /// Returns the rejection reason when the gate blocks, nil to proceed.
     public static func decide(noulProbability: Double, threshold: Double) -> String? {
         noulProbability < threshold
-            ? String(format: "proceed probability %.2f is below threshold %.2f", noulProbability, threshold)
+            ? String(format: "harmless probability %.2f is below threshold %.2f (likely harmful)",
+                     noulProbability, threshold)
             : nil
     }
 
@@ -46,15 +51,23 @@ public enum ModelGate {
             return nil
         }
         do {
+            let state = String(input.prefix(50_000))
+            let request = TypeSafeClient.request(state: state, questions: [question])
+            if let pretty = try? JSONEncoder().encode(request), let text = String(data: pretty, encoding: .utf8) {
+                print(AgentUI.dim("   [gate →] \(text)"))
+            }
             let root = try await TypeSafeClient.evaluate(
-                state: String(input.prefix(50_000)), questions: [question], apiKey: apiKey)
+                state: state, questions: [question], apiKey: apiKey)
+            if let pretty = try? JSONEncoder().encode(root), let text = String(data: pretty, encoding: .utf8) {
+                print(AgentUI.dim("   [gate ←] \(text)"))
+            }
             guard let probability = root.objectValue?["answers"]?
-                .objectValue?["proceed"]?.objectValue?["noul"]?.doubleValue else {
+                .objectValue?[question.id]?.objectValue?["noul"]?.doubleValue else {
                 print(AgentUI.warn("gate answer unparseable — proceeding"))
                 return nil
             }
             let percent = Int((probability * 100).rounded())
-            print(AgentUI.dim("   [gate: proceed \(percent)%]"))
+            print(AgentUI.dim("   [gate: harmless \(percent)%]"))
             return decide(noulProbability: probability, threshold: config.gateThreshold)
         } catch {
             print(AgentUI.warn("gate check failed (\(error)) — proceeding (fail-open)"))

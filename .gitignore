@@ -5,3 +5,4 @@
 *.o
 *.linkfile
 build/.simple.h.conf
+.simple.h.conf

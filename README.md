@@ -121,7 +121,10 @@ A JSON config file (`--config PATH`, `HARNESS_CONFIG`, or by default
 flags > environment > config file > defaults.
 If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
-`/models` lists what the current provider offers.
+`/models` lists what the current provider offers. Typing `@` in the prompt
+lists files under the working directory and live-filters them as you type
+(prefix on filename or path; Tab completes the common prefix, Ctrl-U clears
+the line).
 
 ### GLM Coding Plan (Z.ai)
 

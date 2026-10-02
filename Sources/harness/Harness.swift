@@ -118,9 +118,10 @@ struct HarnessMain {
         var input = ""
         while true {
             let prompt = input.isEmpty ? "\(AgentUI.bold)you › \(AgentUI.reset)" : "  … › "
-            print(prompt, terminator: "")
-            fflush(stdout)  // prompt has no newline — flush it explicitly
-            guard let line = readLine() else { print(); break }  // Ctrl-D = EOF
+            // TTY input goes through the raw-mode reader so "@" completes
+            // file paths as you type (AtCompletion.swift); pipes fall back
+            // to plain readLine() inside it.
+            guard let line = AtCompletion.readLine(prompt: prompt) else { print(); break }  // Ctrl-D = EOF
             if line.hasSuffix("\\") {
                 input += String(line.dropLast()) + "\n"
                 continue

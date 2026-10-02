@@ -150,12 +150,12 @@ struct CompactionBoundaryTests {
 struct ProviderTests {
     @Test("env-key autodetect and --provider override")
     func autodetectAndOverride() {
-        let cloud = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "stub-key"])
+        let cloud = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "stub-key"], pi: PIConfigSnapshot())
         #expect(cloud.provider == "ollama-cloud")
         #expect(cloud.baseURL == "https://ollama.com/v1")
         #expect(cloud.model == "kimi-k2.7-code")
 
-        let forced = Config.resolve(arguments: ["--provider", "openai"], env: ["OLLAMA_API_KEY": "a"])
+        let forced = Config.resolve(arguments: ["--provider", "openai"], env: ["OLLAMA_API_KEY": "a"], pi: PIConfigSnapshot())
         #expect(forced.provider == "openai" && forced.baseURL == "https://api.openai.com/v1")
     }
 
@@ -163,24 +163,24 @@ struct ProviderTests {
     func envKeysBeatBorrowed() {
         // deepseek has a borrowable pi key on machines with auth.json — an
         // explicit OPENAI_API_KEY must still win (caught a real regression).
-        let resolved = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "explicit"])
+        let resolved = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "explicit"], pi: PIConfigSnapshot())
         #expect(resolved.provider == "openai")
     }
 
     @Test("autodetect order: zai before deepseek")
     func autodetectOrder() {
-        let both = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "z", "DEEPSEEK_API_KEY": "d"])
+        let both = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "z", "DEEPSEEK_API_KEY": "d"], pi: PIConfigSnapshot())
         #expect(both.provider == "zai")
     }
 
     @Test("coding plan endpoints are opt-in")
     func codingPlans() {
-        let cn = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:])
+        let cn = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:], pi: PIConfigSnapshot())
         #expect(cn.provider == "zai-coding-cn")
         #expect(cn.baseURL == "https://open.bigmodel.cn/api/coding/paas/v4")
         #expect(cn.model == "glm-5.3")
 
-        let intl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:])
+        let intl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:], pi: PIConfigSnapshot())
         #expect(intl.provider == "zai-coding")
         #expect(intl.baseURL == "https://api.z.ai/api/coding/paas/v4")
     }
@@ -217,9 +217,9 @@ struct ProviderTests {
 
     @Test("wire quirks are profile data")
     func wireQuirks() {
-        #expect(Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"]).tokenLimitKey == "max_completion_tokens")
-        #expect(Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"]).streamOptions)
-        #expect(!Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"]).streamOptions)
+        #expect(Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"], pi: PIConfigSnapshot()).tokenLimitKey == "max_completion_tokens")
+        #expect(Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"], pi: PIConfigSnapshot()).streamOptions)
+        #expect(!Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"], pi: PIConfigSnapshot()).streamOptions)
     }
 }
 
@@ -270,24 +270,25 @@ struct GateTests {
     func questionShape() {
         #expect(ModelGate.question.type == "noul")
         let request = TypeSafeClient.request(state: "fix the build", questions: [ModelGate.question])
-        #expect(request.objectValue?["questions"]?.objectValue?["proceed"]?
+        #expect(request.objectValue?["questions"]?.objectValue?[ModelGate.question.id]?
             .objectValue?["type"]?.stringValue == "noul")
     }
 
     @Test("gate config: opt-in flag and threshold bounds via env")
     func configResolution() {
-        let off = Config.resolve(arguments: [], env: ["TYPESAFE_API_KEY": "k"])
+        let off = Config.resolve(arguments: [], env: ["TYPESAFE_API_KEY": "k"], pi: PIConfigSnapshot())
         #expect(!off.gateEnabled)
-        let on = Config.resolve(arguments: [], env: ["TYPESAFE_API_KEY": "k", "HARNESS_GATE": "1"])
+        let on = Config.resolve(arguments: [], env: ["TYPESAFE_API_KEY": "k", "HARNESS_GATE": "1"], pi: PIConfigSnapshot())
         #expect(on.gateEnabled)
         #expect(on.gateThreshold == 0.5)
         let tuned = Config.resolve(arguments: [],
-                                   env: ["HARNESS_GATE": "yes", "HARNESS_GATE_THRESHOLD": "0.8"])
+                                   env: ["HARNESS_GATE": "yes", "HARNESS_GATE_THRESHOLD": "0.8"],
+                                   pi: PIConfigSnapshot())
         #expect(tuned.gateEnabled)
         #expect(tuned.gateThreshold == 0.8)
         // Out-of-range thresholds fall back to the default rather than
         // creating an always-reject (0) or always-proceed (>=1) gate.
-        let bogus = Config.resolve(arguments: [], env: ["HARNESS_GATE": "1", "HARNESS_GATE_THRESHOLD": "1.5"])
+        let bogus = Config.resolve(arguments: [], env: ["HARNESS_GATE": "1", "HARNESS_GATE_THRESHOLD": "1.5"], pi: PIConfigSnapshot())
         #expect(bogus.gateThreshold == 0.5)
     }
 }
