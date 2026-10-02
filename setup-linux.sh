@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# setup-linux.sh — prepare a Linux machine to build and run simple_harness.
+#
+# The project is dependency-free Swift, so the only real requirement is the
+# Swift 6.2 toolchain (swift-tools-version:6.2) plus the small set of system
+# libraries its Foundation needs. This script, run as root or with sudo:
+#
+#   1. installs the distro packages Swift needs (curl/xml2/sqlite/editline…)
+#   2. installs the Swift toolchain if `swift` is missing or too old
+#      (via swiftly, Swift's official version manager — no root needed after)
+#   3. runs a build + selftest to prove the toolchain works
+#
+# Tested shapes: Ubuntu 22.04/24.04 (apt), Fedora (dnf), Arch (pacman).
+# Usage:  ./setup-linux.sh          # install everything
+#         ./setup-linux.sh --check  # only report what's missing
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+SWIFT_MAJOR_REQUIRED=6
+SWIFT_VERSION_TO_INSTALL="6.2.1"
+CHECK_ONLY=0
+[ "${1:-}" = "--check" ] && CHECK_ONLY=1
+
+log()  { printf '\033[36m[setup]\033[0m %s\n' "$*"; }
+fail() { printf '\033[31m[setup] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null || fail "run as root or install sudo"
+    SUDO="sudo"
+fi
+
+# --- 1. detect the package manager -----------------------------------------
+PKG=""
+if command -v apt-get >/dev/null; then PKG=apt
+elif command -v dnf >/dev/null; then PKG=dnf
+elif command -v pacman >/dev/null; then PKG=pacman
+else fail "unsupported distro: no apt-get/dnf/pacman. Install the Swift toolchain manually — https://www.swift.org/install/"
+fi
+
+# --- 2. distro packages the Swift toolchain needs at runtime ----------------
+# (binutils/clang for the C shim target; curl/xml2/sqlite/editline/ncurses
+# are what Swift's Foundation and the REPL link against; git for SPM + VCS)
+APT_PACKAGES=(binutils git curl libcurl4-openssl-dev libxml2-dev libedit2
+              libsqlite3-0 libncurses-dev libz3-dev zlib1g-dev libc6-dev
+              pkg-config)
+DNF_PACKAGES=(binutils git curl libcurl-devel libxml2-devel libedit-devel
+              sqlite-devel ncurses-devel zlib-devel glibc-devel
+              pkgconf-pkg-config)
+PACMAN_PACKAGES=(binutils git curl curl libxml2 libedit sqlite ncurses zlib
+                 pkgconf)
+
+install_packages() {
+    case "$PKG" in
+        apt)    $SUDO apt-get update -qq && $SUDO apt-get install -y "${APT_PACKAGES[@]}" ;;
+        dnf)    $SUDO dnf install -y "${DNF_PACKAGES[@]}" ;;
+        pacman) $SUDO pacman -Sy --needed --noconfirm "${PACMAN_PACKAGES[@]}" ;;
+    esac
+}
+
+# --- 3. swift presence / version --------------------------------------------
+swift_ok() {
+    command -v swift >/dev/null || return 1
+    local version
+    version=$(swift --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    [ -n "$version" ] || return 1
+    [ "${version%%.*}" -ge "$SWIFT_MAJOR_REQUIRED" ]
+}
+
+if swift_ok; then
+    log "Swift toolchain OK: $(swift --version | head -1)"
+else
+    if [ "$CHECK_ONLY" = 1 ]; then
+        log "MISSING: Swift >= $SWIFT_MAJOR_REQUIRED toolchain (this script would install $SWIFT_VERSION_TO_INSTALL via swiftly)"
+    else
+        log "Installing Swift $SWIFT_VERSION_TO_INSTALL via swiftly (Swift's official version manager)"
+        install_packages   # swiftly's dependencies first
+        curl -Os https://download.swift.org/swiftly/install.sh
+        chmod +x install.sh
+        ./install.sh --quiet --no-modify-path "swift-$SWIFT_VERSION_TO_INSTALL"
+        rm install.sh
+        export PATH="$HOME/.local/share/swiftly/bin:$PATH"
+        [ -f "$HOME/.local/share/swiftly/env.sh" ] && . "$HOME/.local/share/swiftly/env.sh"
+        swift_ok || fail "swift still not usable after install — check https://www.swift.org/install/"
+        log "Installed: $(swift --version | head -1)"
+    fi
+fi
+
+# --- 4. verify by building ---------------------------------------------------
+if [ "$CHECK_ONLY" = 1 ]; then
+    log "Check complete — install the items above, then re-run without --check."
+    exit 0
+fi
+
+cd "$(dirname "$0")"
+log "Building (first build takes a few minutes)…"
+swift build
+log "Running the offline selftest…"
+swift run harness --selftest >/dev/null && log "selftest passed"
+
+cat <<EOF
+
+[setup] Done. To use the harness from a fresh shell:
+    source ~/.local/share/swiftly/env.sh   # only if swiftly installed it
+    swift run harness                      # or: swift build -c release
+    ./.build/release/harness --help
+
+Then create a ./.simple.h.conf next to where you run it (see README.md) and
+export TYPESAFE_API_KEY=… if you want the judge tool / pre-model gate.
+EOF

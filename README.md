@@ -53,6 +53,10 @@ whole conversation: tool calls, tool results, everything.
 
 ## Quickstart
 
+On Linux, `./setup-linux.sh` installs everything needed (Swift 6.2 toolchain
+via swiftly plus the system libraries Foundation links against) and verifies
+with a build + selftest. `--check` only reports what's missing.
+
 ```bash
 swift build
 ./.build/debug/harness                 # interactive REPL

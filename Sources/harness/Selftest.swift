@@ -210,29 +210,29 @@ enum SelfTest {
             Self.check(name, condition, detail, failures: &failures)
         }
         // Env is injected, so this never touches real secrets.
-        let cloud = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "stub-key"])
+        let cloud = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "stub-key"], pi: PIConfigSnapshot(), file: [:])
         check("ollama-cloud autodetect (OLLAMA_API_KEY)",
               cloud.provider == "ollama-cloud" && cloud.baseURL == "https://ollama.com/v1"
                   && cloud.model == "kimi-k2.7-code",
               "provider=\(cloud.provider) model=\(cloud.model)")
-        let forced = Config.resolve(arguments: ["--provider", "openai"], env: ["OLLAMA_API_KEY": "a"])
+        let forced = Config.resolve(arguments: ["--provider", "openai"], env: ["OLLAMA_API_KEY": "a"], pi: PIConfigSnapshot(), file: [:])
         check("--provider overrides autodetect",
               forced.provider == "openai" && forced.baseURL == "https://api.openai.com/v1",
               "provider=\(forced.provider)")
         // Autodetect order: zai beats deepseek when both env keys exist.
-        let both = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "z", "DEEPSEEK_API_KEY": "d"])
+        let both = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "z", "DEEPSEEK_API_KEY": "d"], pi: PIConfigSnapshot(), file: [:])
         check("autodetect order (zai before deepseek)", both.provider == "zai", "provider=\(both.provider)")
 
         // GLM Coding Plan: opt-in endpoints (never autodetected — plan quota
         // must not be silently routed to).
         let fakePi = PIConfigSnapshot(apiKeys: ["zai-coding-cn": "fake-cn-key", "deepseek": "fake-deepseek-key"])
-        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:], pi: fakePi)
+        let codingCN = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:], pi: fakePi, file: [:])
         check("zai-coding-cn (CN plan) endpoint",
               codingCN.provider == "zai-coding-cn"
                   && codingCN.baseURL == "https://open.bigmodel.cn/api/coding/paas/v4"
                   && codingCN.model == "glm-5.3",
               "provider=\(codingCN.provider) model=\(codingCN.model)")
-        let codingIntl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:], pi: fakePi)
+        let codingIntl = Config.resolve(arguments: ["--provider", "zai-coding"], env: [:], pi: fakePi, file: [:])
         check("zai-coding (international plan) endpoint",
               codingIntl.provider == "zai-coding"
                   && codingIntl.baseURL == "https://api.z.ai/api/coding/paas/v4",
@@ -240,24 +240,24 @@ enum SelfTest {
         check("zai-coding-cn borrows injected key", codingCN.apiKey == "fake-cn-key", "apiKey=\(codingCN.apiKey)")
 
         // ---- DeepSeek: provider resolution with the env key -----------------
-        let deepseek = Config.resolve(arguments: [], env: ["DEEPSEEK_API_KEY": "sk-test"])
+        let deepseek = Config.resolve(arguments: [], env: ["DEEPSEEK_API_KEY": "sk-test"], pi: PIConfigSnapshot(), file: [:])
         check("deepseek autodetect (DEEPSEEK_API_KEY)",
               deepseek.provider == "deepseek" && deepseek.baseURL == "https://api.deepseek.com"
                   && deepseek.model == "deepseek-flash",
               "provider=\(deepseek.provider) model=\(deepseek.model)")
 
         // DeepSeek alone permits its injected borrowed key to satisfy autodetect.
-        let borrowedDefault = Config.resolve(arguments: [], env: [:], pi: fakePi)
+        let borrowedDefault = Config.resolve(arguments: [], env: [:], pi: fakePi, file: [:])
         check("deepseek default via borrowed pi key",
               borrowedDefault.provider == "deepseek", "provider=\(borrowedDefault.provider)")
 
         // ---- provider quirks are data on the profile (modular config) ------
-        let openaiQuirks = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"])
+        let openaiQuirks = Config.resolve(arguments: [], env: ["OPENAI_API_KEY": "k"], pi: PIConfigSnapshot(), file: [:])
         check("openai quirk: max_completion_tokens",
               openaiQuirks.tokenLimitKey == "max_completion_tokens", openaiQuirks.tokenLimitKey)
-        let cloudQuirks = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"])
+        let cloudQuirks = Config.resolve(arguments: [], env: ["OLLAMA_API_KEY": "k"], pi: PIConfigSnapshot(), file: [:])
         check("ollama-cloud quirk: stream_options allowed", cloudQuirks.streamOptions, "")
-        let zaiQuirks = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"])
+        let zaiQuirks = Config.resolve(arguments: [], env: ["ZAI_API_KEY": "k"], pi: PIConfigSnapshot(), file: [:])
         check("zai quirk: no stream_options by default", zaiQuirks.streamOptions == false, "")
         return failures
     }
@@ -321,7 +321,8 @@ enum SelfTest {
             check("reasoning_effort request builds", false, "\(error)")
         }
         check("config-driven reasoning effort",
-              Config.resolve(arguments: ["--reasoning", "high"], env: [:]).reasoningEffort == "high", "")
+              Config.resolve(arguments: ["--reasoning", "high"], env: [:],
+                             pi: PIConfigSnapshot(), file: [:]).reasoningEffort == "high", "")
         let conflict = LLMError(status: 400, body:
             "Function tools with reasoning_effort are not supported for gpt-5.6-luna.")
         check("conflict detected for the self-healing retry",
