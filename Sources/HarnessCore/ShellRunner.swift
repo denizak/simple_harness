@@ -41,6 +41,30 @@ private final class BoundedPipeReader: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return (data, discarded)
     }
+
+    /// Drain whatever the async reader hasn't consumed yet. Called on the
+    /// runner thread after the process group is dead: the writers are gone,
+    /// so the pipe holds a finite buffer. This keeps output capture
+    /// deterministic even when the QoS-starved dispatch queue never got
+    /// scheduled inside the join timeout (seen on loaded CI runners).
+    /// Flipping the fd to non-blocking also stops the async reader cleanly;
+    /// a concurrent read() on a pipe is safe (reads are atomic per chunk).
+    func drainRemaining() {
+        let flags = fcntl(descriptor, F_GETFL)
+        _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { raw in
+                read(descriptor, raw.baseAddress, raw.count)
+            }
+            if count <= 0 { break }  // EAGAIN (async reader won the race), EOF, or EINTR
+            lock.lock()
+            let retained = min(count, max(0, limit - data.count))
+            if retained > 0 { data.append(contentsOf: buffer.prefix(retained)) }
+            discarded += count - retained
+            lock.unlock()
+        }
+    }
 }
 
 /// Runs one shell in its own POSIX process group. Output is drained from both
@@ -114,6 +138,8 @@ public enum ShellRunner {
         }
         _ = stdout.finished.wait(timeout: .now() + 1)
         _ = stderr.finished.wait(timeout: .now() + 1)
+        stdout.drainRemaining()
+        stderr.drainRemaining()
         close(outFD)
         close(errFD)
 
