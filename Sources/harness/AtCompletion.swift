@@ -49,64 +49,96 @@ enum AtCompletion {
 
         var buffer: [UInt8] = []
         var listedLines = 0
+        var selected = -1  // highlighted row in the completion list, -1 = none
         let files = fileIndex()
         write(prompt)
 
         while true {
             var byte: UInt8 = 0
             guard read(STDIN_FILENO, &byte, 1) == 1 else { write("\r\n"); return nil }
+            var bufferChanged = false
             switch byte {
             case 0x03:  // Ctrl-C — abandon the line, stay in the REPL
                 write("\r\n")
                 return ""
             case 0x04:  // Ctrl-D — EOF only on an empty line
                 if buffer.isEmpty { write("\r\n"); return nil }
-            case 0x0A, 0x0D:  // Enter — accept
-                write("\r\n")
-                return String(decoding: buffer, as: UTF8.self)
+            case 0x0A, 0x0D:  // Enter — with a highlighted row: accept it; otherwise accept the line
+                let shown = shownMatches(files: files, buffer: buffer).shown
+                if selected >= 0 && selected < shown.count,
+                   let token = atToken(in: buffer) {
+                    replace(token: token, in: &buffer, with: Array(shown[selected].utf8))
+                    selected = -1
+                    bufferChanged = true
+                } else {
+                    write("\r\n")
+                    return String(decoding: buffer, as: UTF8.self)
+                }
             case 0x7F:  // Backspace — drop the last (whole) UTF-8 character
                 while let last = buffer.last, last & 0b1100_0000 == 0b1000_0000 {
                     buffer.removeLast()
                 }
                 if !buffer.isEmpty { buffer.removeLast() }
+                bufferChanged = true
             case 0x15:  // Ctrl-U — kill the whole line
                 buffer.removeAll()
-            case 0x09:  // Tab — complete to the longest common prefix
-                if let token = atToken(in: buffer),
-                   let completion = commonPrefix(of: matching(files: files, token: token)) {
-                    replace(token: token, in: &buffer, with: Array(completion.utf8))
+                bufferChanged = true
+            case 0x09:  // Tab — highlighted row: complete to it; otherwise to the common prefix
+                if let token = atToken(in: buffer) {
+                    let shown = shownMatches(files: files, buffer: buffer).shown
+                    if selected >= 0 && selected < shown.count {
+                        replace(token: token, in: &buffer, with: Array(shown[selected].utf8))
+                    } else if let completion = commonPrefix(of: matching(files: files, token: token)) {
+                        replace(token: token, in: &buffer, with: Array(completion.utf8))
+                    }
+                    bufferChanged = true
                 }
-            case 0x1B:  // ESC — consume the rest of a control sequence (arrows)
+            case 0x1B:  // ESC — control sequence: ↑/↓ move the highlight, others ignored
                 var sequence = [UInt8](repeating: 0, count: 2)
-                _ = read(STDIN_FILENO, &sequence, 2)
+                if read(STDIN_FILENO, &sequence, 2) == 2, sequence[0] == 0x5B {
+                    let count = shownMatches(files: files, buffer: buffer).shown.count
+                    switch sequence[1] {
+                    case 0x41: selected = count == 0 ? -1 : max(selected - 1, -1)  // ↑
+                    case 0x42: selected = count == 0 ? -1 : min(selected + 1, count - 1)  // ↓
+                    default: break
+                    }
+                }
             case let printable where printable >= 0x20:
                 buffer.append(printable)
+                bufferChanged = true
             default:
                 break  // other control bytes: ignore
             }
-            redraw(prompt: prompt, buffer: buffer, matches: matchesToShown(files: files, buffer: buffer),
-                   listedLines: &listedLines)
+            if bufferChanged { selected = -1 }
+            let shown = shownMatches(files: files, buffer: buffer)
+            redraw(prompt: prompt, buffer: buffer, matches: shown.shown, total: shown.total,
+                   selected: selected, listedLines: &listedLines)
         }
     }
 
     // -- rendering ----------------------------------------------------------
 
-    private static func matchesToShown(files: [String], buffer: [UInt8]) -> [String] {
-        guard let token = atToken(in: buffer) else { return [] }
+    /// The rows shown under the prompt (unstyled, for selection) and the
+    /// total match count, for the "… +N more" overflow line.
+    private static func shownMatches(files: [String], buffer: [UInt8]) -> (shown: [String], total: Int) {
+        guard let token = atToken(in: buffer) else { return ([], 0) }
         let all = matching(files: files, token: token)
-        let shown = all.prefix(maxListed).map { AgentUI.dim("  " + $0) }
-        if all.count > maxListed {
-            return shown + [AgentUI.dim("  … +\(all.count - maxListed) more")]
-        }
-        return shown
+        return (Array(all.prefix(maxListed)), all.count)
     }
 
     /// Redraw the input line plus the match list below it, then put the
     /// cursor back where the user is typing. Clears stale list lines from
     /// the previous draw.
-    private static func redraw(prompt: String, buffer: [UInt8], matches: [String], listedLines: inout Int) {
+    private static func redraw(prompt: String, buffer: [UInt8], matches: [String], total: Int,
+                               selected: Int, listedLines: inout Int) {
         var out = "\r\u{1B}[K" + prompt + String(decoding: buffer, as: UTF8.self)
-        for line in matches { out += "\r\n\u{1B}[K" + line }
+        for (index, path) in matches.enumerated() {
+            out += "\r\n\u{1B}[K"
+            out += index == selected
+                ? "\u{1B}[7m  \(path)\u{1B}[0m"
+                : AgentUI.dim("  " + path)
+        }
+        if total > matches.count { out += "\r\n\u{1B}[K" + AgentUI.dim("  … +\(total - matches.count) more") }
         if matches.count < listedLines {
             for _ in 0..<(listedLines - matches.count) { out += "\r\n\u{1B}[K" }
         }
