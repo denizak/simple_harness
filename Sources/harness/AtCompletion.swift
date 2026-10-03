@@ -113,12 +113,32 @@ enum AtCompletion {
         let drawn = max(matches.count, listedLines)
         if drawn > 0 { out += "\u{1B}[\(drawn)A" }
         out += "\r"
+        // Park the cursor after the last typed character, not at column 0.
+        out += "\u{1B}[\(Self.displayWidth(of: prompt) + Self.displayWidth(of: String(decoding: buffer, as: UTF8.self)))C"
         listedLines = matches.count
         write(out)
     }
 
     private static func write(_ text: String) {
         FileHandle.standardOutput.write(Data(text.utf8))
+    }
+
+    /// Characters the terminal actually renders: ANSI escapes stripped,
+    /// counting Unicode scalars (good enough for ASCII paths and prompts;
+    /// CJK wide chars would still drift, but we don't emit those).
+    private static func displayWidth(of text: String) -> Int {
+        var width = 0
+        var inEscape = false
+        for scalar in text.unicodeScalars {
+            if inEscape {
+                if scalar == "m" { inEscape = false }
+            } else if scalar == "\u{1B}" {
+                inEscape = true
+            } else {
+                width += 1
+            }
+        }
+        return width
     }
 
     // -- matching -----------------------------------------------------------
