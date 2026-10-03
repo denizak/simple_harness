@@ -53,6 +53,10 @@ public struct Config: Sendable {
     public var gateEnabled: Bool = false
     /// Minimum "proceed" probability for the gate to let a task through.
     public var gateThreshold: Double = 0.5
+    /// Tool-approval gate (Approval.swift): which tool calls need a human
+    /// yes before running (never | dangerous | all). Fail-closed: with a
+    /// demanding policy and no installed hook, calls are denied.
+    public var approvalPolicy: ApprovalPolicy = .never
     /// Wire-format quirk resolved from the provider profile: which
     /// token-limit field the server accepts ("max_tokens" or, for newer
     /// OpenAI models, "max_completion_tokens").
@@ -81,6 +85,7 @@ public struct Config: Sendable {
         typesafeApiKey: String? = nil,
         gateEnabled: Bool = false,
         gateThreshold: Double = 0.5,
+        approvalPolicy: ApprovalPolicy = .never,
         tokenLimitKey: String = "max_tokens",
         streamOptions: Bool = false
     ) {
@@ -99,6 +104,7 @@ public struct Config: Sendable {
         self.typesafeApiKey = typesafeApiKey
         self.gateEnabled = gateEnabled
         self.gateThreshold = gateThreshold
+        self.approvalPolicy = approvalPolicy
         self.tokenLimitKey = tokenLimitKey
         self.streamOptions = streamOptions
     }
@@ -217,6 +223,16 @@ public struct Config: Sendable {
            parsed > 0, parsed < 1 {
             config.gateThreshold = parsed
         }
+        // Tool-approval policy: dangerous/all install the gate; anything else
+        // (including an unrecognized word, which warns) stays `never`.
+        if let value = env["HARNESS_APPROVAL"] {
+            if let policy = ApprovalPolicy.parse(value) {
+                config.approvalPolicy = policy
+            } else {
+                print(AgentUI.warn(
+                    "HARNESS_APPROVAL='\(value)' is not one of never|dangerous|all — using never"))
+            }
+        }
 
         // 5. Explicit flags always win: --base-url/--api-key/--model/--reasoning.
         var iterator = arguments.makeIterator()
@@ -236,6 +252,9 @@ public struct Config: Sendable {
             if let raw = value("--gate-threshold", nil), let parsed = Double(raw),
                parsed > 0, parsed < 1 {
                 config.gateThreshold = parsed
+            }
+            if let raw = value("--approval", nil), let parsed = ApprovalPolicy.parse(raw) {
+                config.approvalPolicy = parsed
             }
             // Presence flags for the settings a one-off run most often flips.
             if arguments.contains("--gate") { config.gateEnabled = true }
@@ -321,6 +340,9 @@ public struct Config: Sendable {
         if let value = entries["gate"]?.boolValue { config.gateEnabled = value }
         if let value = entries["gateThreshold"]?.doubleValue, value > 0, value < 1 {
             config.gateThreshold = value
+        }
+        if let value = string("approvalPolicy"), let policy = ApprovalPolicy.parse(value) {
+            config.approvalPolicy = policy
         }
     }
 }

@@ -121,7 +121,7 @@ Environment overrides: `HARNESS_BASE_URL`, `HARNESS_API_KEY`, `HARNESS_MODEL`,
 A JSON config file (`--config PATH`, `HARNESS_CONFIG`, or by default
 `.simple.h.conf` in the working directory) can hold the same values — `provider`, `baseURL`,
 `apiKey`, `model`, `maxTurns`, `streaming`, `reasoningEffort`, `gate`,
-`gateThreshold`, `typesafeApiKey`, … as a top-level JSON object. Precedence:
+`gateThreshold`, `typesafeApiKey`, `approval`, … as a top-level JSON object. Precedence:
 flags > environment > config file > defaults.
 If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
@@ -230,7 +230,8 @@ be reached from tests only via `@testable import`.
 1. **Streaming (SSE)** — parse `data: {...}` chunks from
    `/chat/completions` with `URLSession.bytes(for:)`; print tokens as they
    arrive.
-2. **Tool-approval gate** — confirm before `bash` runs; per-tool allowlists.
+2. **Tool-approval gate** ~~(done — see `Sources/HarnessCore/Approval.swift`)~~ — confirm
+   before `bash` runs; per-tool allowlists.
 3. **JSONL sessions** — append one line per message instead of rewriting a
    JSON blob (pi's `session-format.md`); enables crash recovery.
 4. **A second client** — implement `ChatModel` for Anthropic's native

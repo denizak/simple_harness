@@ -101,6 +101,16 @@ public struct AssistantTurn: Sendable {
     public var usage: Usage?
 
     public var wantsTools: Bool { !toolCalls.isEmpty }
+
+    /// Memberwise initializer, public for parity with `ToolCall`: tests and
+    /// embedders outside this module must be able to fabricate model turns for
+    /// stub `ChatModel` conformances.
+    public init(text: String, toolCalls: [ToolCall], finishReason: String, usage: Usage?) {
+        self.text = text
+        self.toolCalls = toolCalls
+        self.finishReason = finishReason
+        self.usage = usage
+    }
 }
 
 public struct Usage: Sendable {
@@ -136,11 +146,23 @@ public struct ToolContext: Sendable {
     public var cwd: String
     /// How deep this agent is in the spawn chain (top agent = 0).
     public var depth: Int
+    /// The injected approval decider plus the task-scoped "always allow"
+    /// memory, carried so spawn_agent can forward both to the sub-agent it
+    /// constructs (next to config and model, which it already copies). An
+    /// approval granted at depth 0 covers depth 1; nothing new to configure.
+    /// Nil hook under a demanding policy denies — fail-closed.
+    public var approvalHook: ApprovalHook?
+    public var approvalState: ApprovalState?
 
-    public init(config: Config, model: ChatModel, cwd: String, depth: Int = 0) {
+    public init(
+        config: Config, model: ChatModel, cwd: String, depth: Int = 0,
+        approvalHook: ApprovalHook? = nil, approvalState: ApprovalState? = nil
+    ) {
         self.config = config
         self.model = model
         self.cwd = cwd
         self.depth = depth
+        self.approvalHook = approvalHook
+        self.approvalState = approvalState
     }
 }

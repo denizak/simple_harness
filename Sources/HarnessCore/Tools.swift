@@ -382,6 +382,12 @@ public enum Tools {
                     "final report. Current directory: \(context.cwd)")
         ]
         var subAgent = Agent(config: subConfig, model: context.model, depth: context.depth + 1)
+        // Inherit the approval gate: same human authority, same task-scoped
+        // "always allow" memory (one decision covers the whole task, at any
+        // depth). The child cannot widen its own policy — approvalPolicy is
+        // a `let` on Config and travels via subConfig untouched.
+        subAgent.approvalHook = context.approvalHook
+        subAgent.approvalState = context.approvalState
         do {
             try await subAgent.run(task: task, messages: &subMessages)
         } catch {

@@ -57,6 +57,24 @@ public struct Agent {
         self.depth = depth
     }
 
+    // ---- Tool-approval gate (Approval.swift) ------------------------------
+    // Ownership: the *policy* lives in Config; the *decider* is injected
+    // here. A nil decider under a demanding policy (dangerous/all) must
+    // deny — fail-closed — never execute.
+    /// The injected human decision; nil means "no authority to ask".
+    public var approvalHook: ApprovalHook?
+    /// Task-scoped "always allow" memory, shared with spawned sub-agents.
+    /// Nil means "not recording" — the rule still consults policy each time.
+    public var approvalState: ApprovalState?
+
+    /// Per-top-level-task: start with a clean "always allow" slate. A new
+    /// `run(task:)` must re-prompt for everything the previous task approved;
+    /// `/retry` goes through continueRun instead, so a retry of the same
+    /// task keeps what the user already approved.
+    public mutating func resetApprovalState() {
+        approvalState = ApprovalState()
+    }
+
     /// Runtime settings and the client built from them must change together;
     /// otherwise a REPL model switch updates saved metadata but sends requests
     /// through a stale value-type client configuration.
@@ -87,6 +105,10 @@ public struct Agent {
             print(AgentUI.warn("[gate] task rejected — \(rejection)"))
             return
         }
+        // Only a TOP-LEVEL task starts a fresh "always" slate. Sub-agents
+        // arrive via run() too; resetting here would wipe the parent's
+        // approvals out from under the shared state.
+        if depth == 0 { resetApprovalState() }
         messages.append(.user(input))
         try await continueRun(messages: &messages)
     }
@@ -185,13 +207,58 @@ public struct Agent {
             return error
         }
 
+        // ---- 3.5 Approval gate: after parsing, before execution -----------
+        // Malformed arguments died above as parse errors; a denial returns a
+        // tool-result error without running the tool or mutating any file.
+        let toolName = tool.name
+        if config.approvalPolicy != .never {
+            // "always allow" memory is shared with spawned sub-agents; a nil
+            // state simply means nothing is pre-approved.
+            let alreadyApproved: Bool
+            if let approvalState {
+                alreadyApproved = await approvalState.isAlwaysApproved(tool: toolName)
+            } else {
+                alreadyApproved = false
+            }
+            if config.approvalPolicy.requiresApproval(tool: toolName, alreadyApproved: alreadyApproved) {
+                // Fail-closed: no hook installed (--once, or a test with no
+                // scripted hook) means there is no human to consent, so the
+                // call is denied. Deliberately opposite of the fail-open
+                // classifier gate: an unreachable classifier is an outage,
+                // an unreachable human is not consent.
+                guard let hook = approvalHook else {
+                    let error = "error: \(toolName) requires approval " +
+                                "(policy: \(config.approvalPolicy.rawValue)) but no " +
+                                "approval hook is installed; the tool was not run."
+                    print(AgentUI.toolResult(error, isError: true))
+                    return error
+                }
+                let summary = approvalArgumentSummary(call.function.arguments)
+                switch await hook(toolName, summary) {
+                case .deny:
+                    // One tool result, no execution. The model reads the
+                    // denial and can adapt on its next turn; the denial
+                    // consuming a turn is inherent to results-as-text.
+                    let error = approvalDeniedText(tool: toolName)
+                    print(AgentUI.toolResult(error, isError: true))
+                    return error
+                case .approveAlways:
+                    await approvalState?.recordAlways(tool: toolName)
+                case .approve:
+                    break  // run this call once
+                }
+            }
+        }
+
         let output: String
         do {
             output = try await tool.run(arguments, ToolContext(
                 config: config,
                 model: model,
                 cwd: FileManager.default.currentDirectoryPath,
-                depth: depth
+                depth: depth,
+                approvalHook: approvalHook,
+                approvalState: approvalState
             ))
         } catch {
             output = "error: \(error.localizedDescription)"

@@ -1,6 +1,6 @@
 # Implemented follow-up tasks
 
-Originally planned against baseline `c96ad42`; implemented in order T1–T5 in the current worktree. No commits were created.
+Originally planned against baseline `c96ad42`; implemented in order T1–T5 in the current worktree. No commits were created. T6 is planned against `4d7ba3a` and awaits implementation.
 
 ## Baseline and order
 
@@ -135,6 +135,90 @@ Keep the dependency-free, macOS/Linux design. Use scripted models, temporary dir
 
 **Out of scope:** JSONL journaling, crash recovery mid-tool, exactly-once side effects across crashes.
 
+## T6 — Tool-approval gate (planned; not yet implemented)
+
+Planned against `4d7ba3a`, not `c96ad42`; not yet implemented. Builds on T3's enforced
+dispatch boundary: `Agent.execute` already resolves against `availableTools`, parses
+arguments, and turns every failure into exactly one tool result. This task inserts one
+optional human decision between argument parsing and execution — README "Where to go
+next" #2.
+
+**Why now:** The pre-model `ModelGate` judges whole user *tasks* with a classifier, but
+no authority stands between a model decision and a destructive tool run. `bash` can do
+anything; `write_file` can overwrite. An approval gate at the single execution choke
+point closes that gap with the same "errors are text" philosophy the rest of the loop
+uses.
+
+**Files:** new `Sources/HarnessCore/Approval.swift`, `Sources/HarnessCore/Agent.swift`,
+`Sources/HarnessCore/Tools.swift` (ToolContext + spawn_agent inheritance only),
+`Sources/harness/Harness.swift` (flag parsing + REPL hook installation),
+`Sources/HarnessCore/Config.swift`, `README.md`, new
+`Tests/HarnessTests/ApprovalTests.swift`.
+
+**Decisions (the two open questions, answered):**
+- *Interactive vs noninteractive:* the interactive REPL installs a real y/n/a prompt;
+  `--once` never does. When a policy requires approval and no hook is installed, the
+  call is **denied** (fail-closed). This is the deliberate opposite of the classifier
+  gate's fail-open: an unreachable classifier is an outage, an unreachable human is
+  not consent.
+- *Child-agent inheritance:* the approval hook and the task-scoped "always allow" state
+  travel on `ToolContext`; `spawn_agent` passes them to the sub-agent it constructs
+  (next to `context.config`, which it already copies). An approval granted at depth 0
+  applies at depth 1; nothing new to configure.
+- *Policy levels:* `never` (default — current behavior, all existing tests unchanged),
+  `dangerous` (`bash`, `write_file`, `edit_file` — the mutating/executing set;
+  `grep`, `read_file`, `judge`, `spawn_agent` are read-only or delegation), `all`.
+- *Denied calls* return a tool-result error naming the tool, so the model can adapt
+  (propose something else) on its next turn — exactly like T3's unavailable-tool path.
+  A denial still consumes a turn; that is inherent to results-as-text.
+- *Scoping:* "always allow this tool" (the `a` answer) lives in an actor created per
+  top-level task. `run(task:)` resets it; `continueRun` (a `/retry` of the same task)
+  keeps it — retry must not re-prompt what the user already approved.
+
+**Implementation:**
+1. Add `ApprovalPolicy` (`never | dangerous | all`) to `Config` (default `.never`),
+   resolved from `HARNESS_APPROVAL` and a `--approval` flag, following the
+   `HARNESS_GATE` pattern.
+2. In `Approval.swift`: the pure rule `decide(policy:tool:alreadyApproved:) -> needsAsk?`
+   (unit-testable without I/O), an `ApprovalDecision` (`approve | approveAlways | deny`),
+   a `Sendable` hook typealias `@Sendable (String, String) async -> ApprovalDecision`
+   (tool name + one-line argument summary), and the interactive stdin prompt.
+3. `Agent` gains the hook + shared state; `ToolContext` carries them so `spawn_agent`
+   forwards both. Add the ownership comment in the style of T2's reconfigure comment:
+   the *policy* lives in Config, the *decider* is injected, and a nil decider with a
+   demanding policy must deny, never execute.
+4. In `Agent.execute`, after successful argument parsing and before `tool.run`: consult
+   the rule, ask the hook if needed, record `approveAlways`. A deny returns the
+   tool-result error without executing and without mutating any file. Malformed
+   arguments still fail as parse errors — never prompt about an unparseable call.
+5. `Harness.swift`: parse the flag, install the interactive hook only in REPL mode,
+   print a one-line notice when a policy is active. `/help` and README updated in the
+   same commit, including the fail-open (gate) vs fail-closed (approval) contrast.
+6. Extend `--selftest` with the pure rule and a scripted deny-through-a-stub-loop case
+   so the feature is verifiable offline, like the rest of the selftest.
+
+**Acceptance tests:**
+- Policy `never` changes nothing: the existing 43-test suite passes unmodified.
+- `dangerous` prompts for `bash`/`write_file`/`edit_file` and never for
+  `grep`/`read_file`/`judge`.
+- A scripted deny produces exactly one tool result per call ID and the target file in a
+  temporary directory is untouched (proved by content, not by mocking).
+- Denial text names the tool and the loop continues: a scripted model that is denied
+  once and succeeds with an alternative completes the task.
+- `approveAlways` suppresses the second prompt within one task; a new task prompts
+  again; a `/retry` of the same task does not re-prompt.
+- Nil hook + `dangerous` denies without executing (fail-closed), stated opposite of the
+  fail-open gate, with a test pinning the difference.
+- A sub-agent's dangerous call consults the shared hook; an "always" from the parent
+  covers the child; the child cannot silently widen its own policy.
+- All tests network-free (stub models + scripted hooks), no TTY required; the prompt
+  implementation itself is exercised only by the selftest reading scripted stdin.
+
+**Out of scope:** per-argument or per-command allowlists ("allow `git status`, deny
+`rm`"), path confinement, diff previews for `edit_file`, remote/mobile approval UIs,
+persisting approvals across restarts, and wiring the TypeSafe classifier in as an
+auto-approver (a natural follow-up: classifier *suggests*, human decides).
+
 ## Completion status
 
 Implemented with offline tests. Latest macOS verification: `swift test` passed (36 tests), `swift run harness --selftest` passed, and `swift build -c release` passed. An isolated `--once` run against a refused localhost endpoint returned exit status 1. Linux CI has not yet run against this worktree.
@@ -154,4 +238,4 @@ Confirm macOS and Linux CI before merging portability-sensitive changes. Do not 
 
 ## After these fixes
 
-The next feature candidate is a tool-approval gate, building on T3's enforced dispatch boundary. Decide interactive versus noninteractive defaults and child-agent policy inheritance before implementing it. JSONL crash recovery and an Anthropic-native client can follow separately; neither should be bundled into the correctness tasks above.
+T6 (tool-approval gate) above is the chosen next feature. After it, JSONL crash recovery and an Anthropic-native client can follow separately; neither should be bundled into the correctness tasks above.

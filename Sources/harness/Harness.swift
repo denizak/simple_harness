@@ -47,6 +47,11 @@ func helpText() {
     /exit             quit (also: Ctrl-D)
     Anything else you type becomes the next task for the agent.
     End a line with \\ to continue on the next line.
+
+    Approval gate (--approval dangerous|all, or env HARNESS_APPROVAL): gated
+    tool calls ask y/n/a here first (a = always for this task). Fail-closed:
+    when no human can be asked (--once), the call is denied — the opposite of
+    the pre-model classifier gate, which fails open on errors.
     """)
 }
 
@@ -80,6 +85,9 @@ struct HarnessMain {
                   --gate            enable the pre-model gate (TypeSafe; needs TYPESAFE_API_KEY)
                   --no-gate         disable it (overrides file/env)
                   --gate-threshold P   minimum proceed probability (0..<1, default 0.5)
+                  --approval POLICY   never | dangerous | all — ask y/n/a before
+                                      gated tool calls (default never; env
+                                      HARNESS_APPROVAL; REPL-only prompts)
                   --no-streaming    disable SSE streaming
                   --max-turns N     turn cap per task (default 25)
                   --typesafe-key KEY   TypeSafe API key override
@@ -94,6 +102,18 @@ struct HarnessMain {
 
         let config = Config.resolve(arguments: arguments)
         banner(config)
+
+        // ---- Approval-gate notice + hook installation -----------------------
+        // The notice prints for ANY policy, so a silent environment override
+        // (HARNESS_APPROVAL) is never invisible. The hook (the real y/n/a
+        // prompt) is installed ONLY in interactive mode: --once has no human
+        // at the keyboard, and a nil hook under a demanding policy denies —
+        // fail-closed by construction.
+        if config.approvalPolicy != .never {
+            print(AgentUI.warn(
+                "[approval] policy '\(config.approvalPolicy.rawValue)' active — " +
+                "gated tool calls ask before running (fail-closed without a prompt)"))
+        }
 
         var messages: [Message] = [.system(systemPrompt(for: config))]
         var agent = Agent(config: config, model: OpenAICompatClient(config: config))
@@ -112,6 +132,9 @@ struct HarnessMain {
         }
 
         // ---- Interactive REPL ------------------------------------------------
+        // Interactive only: install the human y/n/a approval prompt. --once
+        // exited above with a nil hook, so a demanding policy denies there.
+        agent.approvalHook = promptForApproval
         // readLine() only delivers ONE line, so multi-line input uses a
         // continuation rule: a trailing backslash splices the next line in.
         // `input` accumulates the splice; the loop resets it after dispatch.

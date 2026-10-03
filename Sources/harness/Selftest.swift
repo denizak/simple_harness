@@ -27,6 +27,7 @@ enum SelfTest {
         failures += reasoningChecks()
         failures += sseAssemblerChecks()
         failures += await loadPrecedenceChecks()
+        failures += await approvalGateChecks()
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
@@ -418,6 +419,95 @@ enum SelfTest {
         } catch {
             check("/load precedence checks ran", false, "\(error)")
         }
+        return failures
+    }
+
+    // ---- approval gate: policy rule + the in-loop gate (offline, scripted) --
+    // Exercises the fail-closed default (nil hook), the deny path, and the
+    // task-scoped "always allow" memory — all without a human or an API call.
+    private static func approvalGateChecks() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        let dir = NSTemporaryDirectory() + "harness-approval-\(UUID().uuidString)/"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let canary = dir + "canary.txt"
+        try? "unchanged".write(toFile: canary, atomically: true, encoding: .utf8)
+
+        func gateConfig(_ policy: ApprovalPolicy) -> Config {
+            var c = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none",
+                           model: "stub", approvalPolicy: policy)
+            c.streaming = false
+            return c
+        }
+
+        // The model writes the canary at most twice, then gives up. That is
+        // what makes the nil-hook/deny scenarios terminate: the gate refuses
+        // the write, the canary never changes, the model retries once and then
+        // closes with a done turn instead of hitting the loop's turn cap.
+        final class ScriptedApprovalModel: ChatModel, @unchecked Sendable {
+            let canary: String
+            var step = 0
+            init(canary: String) { self.canary = canary }
+            func complete(_ messages: [Message], tools: [ToolSpec]) async throws -> AssistantTurn {
+                step += 1
+                if step > 2 {
+                    return AssistantTurn(text: "gave up after refusals", toolCalls: [],
+                                         finishReason: "stop", usage: nil)
+                }
+                // `content` first: the argument summary truncates at 80 chars,
+                // a long temp path would otherwise push the payload past the cut.
+                let payload = #"{"content": "TAMPERED\#(step)", "path": "\#(canary)"}"#
+                let call = ToolCall(id: "self-\(step)", type: "function",
+                                    function: .init(name: "write_file", arguments: payload))
+                return AssistantTurn(text: "", toolCalls: [call],
+                                     finishReason: "tool_calls", usage: nil)
+            }
+        }
+
+        do {
+            // 1. nil hook under .dangerous: fail-closed, tool result is an
+            //    error, canary untouched, loop still ran to completion.
+            var agent = Agent(config: gateConfig(.dangerous), model: ScriptedApprovalModel(canary: canary))
+            var messages: [Message] = [.system("selftest")]
+            try await agent.run(task: "try the write", messages: &messages)
+            let toolMsgs = messages.filter { $0.role == "tool" }
+            check("nil hook denies the gated write (fail-closed)",
+                  toolMsgs.first?.content?.contains("no approval hook") == true,
+                  toolMsgs.first?.content ?? "no tool message")
+            check("canary untouched after nil-hook denial",
+                  (try? String(contentsOfFile: canary, encoding: .utf8)) == "unchanged", "")
+
+            // 2. deny hook: same shape, different authority.
+            var denied = Agent(config: gateConfig(.dangerous), model: ScriptedApprovalModel(canary: canary))
+            denied.approvalHook = { _, _ in .deny }
+            var deniedMsgs: [Message] = [.system("selftest")]
+            try await denied.run(task: "try the write", messages: &deniedMsgs)
+            let deniedTool = deniedMsgs.first { $0.role == "tool" }
+            check("explicit deny keeps the tool from running",
+                  deniedTool?.content?.contains("approval denied") == true
+                  && (try? String(contentsOfFile: canary, encoding: .utf8)) == "unchanged",
+                  deniedTool?.content ?? "no tool message")
+
+            // 3. approveAlways: first write asks, second write skips the hook.
+            final class AlwaysBox: @unchecked Sendable {
+                var asks = 0
+            }
+            let box = AlwaysBox()
+            var approver = Agent(config: gateConfig(.dangerous), model: ScriptedApprovalModel(canary: canary))
+            approver.approvalHook = { _, _ in box.asks += 1; return .approveAlways }
+            approver.approvalState = ApprovalState()
+            var approverMsgs: [Message] = [.system("selftest")]
+            try await approver.run(task: "try the write", messages: &approverMsgs)
+            check("approveAlways: one ask, second write skipped the hook",
+                  box.asks == 1
+                  && (try? String(contentsOfFile: canary, encoding: .utf8)) == "TAMPERED2",
+                  "asks=\(box.asks)")
+        } catch {
+            check("approval gate checks ran", false, "\(error)")
+        }
+        try? FileManager.default.removeItem(atPath: dir)
         return failures
     }
 }
