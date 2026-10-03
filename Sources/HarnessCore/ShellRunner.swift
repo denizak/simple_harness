@@ -27,14 +27,19 @@ private final class BoundedPipeReader: @unchecked Sendable {
                 let count = buffer.withUnsafeMutableBytes { raw in
                     read(descriptor, raw.baseAddress, raw.count)
                 }
+                if count < 0 && errno == EINTR { continue }
                 if count <= 0 { break }
-                lock.lock()
-                let retained = min(count, max(0, limit - data.count))
-                if retained > 0 { data.append(contentsOf: buffer.prefix(retained)) }
-                discarded += count - retained
-                lock.unlock()
+                append(buffer, count)
             }
         }
+    }
+
+    private func append(_ buffer: [UInt8], _ count: Int) {
+        lock.lock()
+        let retained = min(count, max(0, limit - data.count))
+        if retained > 0 { data.append(contentsOf: buffer.prefix(retained)) }
+        discarded += count - retained
+        lock.unlock()
     }
 
     func snapshot() -> (Data, Int) {
@@ -57,12 +62,11 @@ private final class BoundedPipeReader: @unchecked Sendable {
             let count = buffer.withUnsafeMutableBytes { raw in
                 read(descriptor, raw.baseAddress, raw.count)
             }
-            if count <= 0 { break }  // EAGAIN (async reader won the race), EOF, or EINTR
-            lock.lock()
-            let retained = min(count, max(0, limit - data.count))
-            if retained > 0 { data.append(contentsOf: buffer.prefix(retained)) }
-            discarded += count - retained
-            lock.unlock()
+            if count > 0 { append(buffer, count); continue }
+            // EINTR: a delivered signal must not end the drain — retry.
+            // EAGAIN: the async reader consumed the rest; EOF: done.
+            if count < 0 && errno == EINTR { continue }
+            break
         }
     }
 }
@@ -136,8 +140,11 @@ public enum ShellRunner {
             usleep(50_000)
             _ = kill(-pid, SIGKILL)
         }
-        _ = stdout.finished.wait(timeout: .now() + 1)
-        _ = stderr.finished.wait(timeout: .now() + 1)
+        // Brief courtesy join for the async pump; anything it didn't get to
+        // is recovered by the deterministic sync drain below, so a starved
+        // dispatch queue only costs a fraction of a second, never output.
+        _ = stdout.finished.wait(timeout: .now() + 0.25)
+        _ = stderr.finished.wait(timeout: .now() + 0.25)
         stdout.drainRemaining()
         stderr.drainRemaining()
         close(outFD)
