@@ -22,8 +22,8 @@ import Glibc
 //
 // The completion rule: the text after the last unspaced "@" in the buffer is
 // a file-token; matching files under the working directory are listed below
-// the prompt and re-filtered on every keystroke (case-insensitive prefix on
-// path or filename). An empty token lists everything. No "@" → plain line
+// the prompt and re-filtered on every keystroke (case-insensitive "contains"
+// on path or filename). An empty token lists everything. No "@" → plain line
 // editing, no list.
 //
 // Non-TTY stdin (pipes, --e2e, tests) falls back to plain readLine().
@@ -209,14 +209,14 @@ enum AtCompletion {
         return files.sorted()
     }
 
-    /// Case-insensitive prefix match on filename or full relative path.
+    /// Case-insensitive "contains" match on filename or full relative path.
     static func matching(files: [String], token: String) -> [String] {
-        let prefix = token.lowercased()
-        guard !prefix.isEmpty else { return files }
+        let needle = token.lowercased()
+        guard !needle.isEmpty else { return files }
         return files.filter { path in
             let lowered = path.lowercased()
-            return lowered.hasPrefix(prefix)
-                || lowered.split(separator: "/").last?.hasPrefix(prefix) == true
+            return lowered.contains(needle)
+                || lowered.split(separator: "/").last?.contains(needle) == true
         }
     }
 
