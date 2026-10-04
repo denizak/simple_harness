@@ -230,8 +230,9 @@ be reached from tests only via `@testable import`.
 1. **Streaming (SSE)** — parse `data: {...}` chunks from
    `/chat/completions` with `URLSession.bytes(for:)`; print tokens as they
    arrive.
-2. **Tool-approval gate** ~~(done — see `Sources/HarnessCore/Approval.swift`)~~ — confirm
-   before `bash` runs; per-tool allowlists.
+2. **Tool-approval gate** (done — see `Sources/HarnessCore/Approval.swift`;
+   `--approval` / `HARNESS_APPROVAL`) — confirm before `bash` runs; per-tool
+   allowlists are the natural follow-up.
 3. **JSONL sessions** — append one line per message instead of rewriting a
    JSON blob (pi's `session-format.md`); enables crash recovery.
 4. **A second client** — implement `ChatModel` for Anthropic's native

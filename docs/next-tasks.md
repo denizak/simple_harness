@@ -1,6 +1,6 @@
 # Implemented follow-up tasks
 
-Originally planned against baseline `c96ad42`; implemented in order T1–T5 in the current worktree. No commits were created. T6 is planned against `4d7ba3a` and awaits implementation.
+Originally planned against baseline `c96ad42`. T1–T5 were implemented in order in that worktree; T6 was planned against `4d7ba3a` and is now implemented (`a566d93`). This document is a historical record — current status lives in "Completion status" below.
 
 ## Baseline and order
 
@@ -135,13 +135,19 @@ Keep the dependency-free, macOS/Linux design. Use scripted models, temporary dir
 
 **Out of scope:** JSONL journaling, crash recovery mid-tool, exactly-once side effects across crashes.
 
-## T6 — Tool-approval gate (planned; not yet implemented)
+## T6 — Tool-approval gate (implemented)
 
-Planned against `4d7ba3a`, not `c96ad42`; not yet implemented. Builds on T3's enforced
-dispatch boundary: `Agent.execute` already resolves against `availableTools`, parses
+Implemented in `a566d93` (planned against `4d7ba3a`, not `c96ad42`). Builds on T3's
+enforced dispatch boundary: `Agent.execute` already resolves against `availableTools`, parses
 arguments, and turns every failure into exactly one tool result. This task inserts one
 optional human decision between argument parsing and execution — README "Where to go
 next" #2.
+
+Landed as: `Sources/HarnessCore/Approval.swift` (pure rule, decision type, hook type,
+interactive prompt), `ApprovalPolicy` in `Config` resolved from `HARNESS_APPROVAL` and
+`--approval`, REPL-only hook installation in `Sources/harness/Harness.swift`, task-scoped
+"always allow" state inherited by `spawn_agent` via `ToolContext`, selftest coverage in
+`Sources/harness/Selftest.swift`, and `Tests/HarnessTests/ApprovalTests.swift`.
 
 **Why now:** The pre-model `ModelGate` judges whole user *tasks* with a classifier, but
 no authority stands between a model decision and a destructive tool run. `bash` can do
@@ -221,7 +227,14 @@ auto-approver (a natural follow-up: classifier *suggests*, human decides).
 
 ## Completion status
 
-Implemented with offline tests. Latest macOS verification: `swift test` passed (36 tests), `swift run harness --selftest` passed, and `swift build -c release` passed. An isolated `--once` run against a refused localhost endpoint returned exit status 1. Linux CI has not yet run against this worktree.
+T1–T6 all implemented with offline tests. Latest macOS verification (at `f004251`):
+`swift test` passed (64 tests), `swift run harness --selftest` passed, `swift build -c
+release` passed, `git diff --check` clean. An isolated `--once` run against a refused
+localhost endpoint returned exit status 1.
+
+Post-T6 hardening already merged: `@`-file completion with arrow-key navigation and
+substring `@`-token matching (`e27aeef`, `4cce27e`) and ShellRunner pipe-drain/EINTR
+fixes (`13f63bc`, `f004251`). Linux CI has not yet been confirmed against these commits.
 
 ## Shared completion gate
 
@@ -238,4 +251,7 @@ Confirm macOS and Linux CI before merging portability-sensitive changes. Do not 
 
 ## After these fixes
 
-T6 (tool-approval gate) above is the chosen next feature. After it, JSONL crash recovery and an Anthropic-native client can follow separately; neither should be bundled into the correctness tasks above.
+All tasks T1–T6 are complete; this roadmap is retired. Remaining candidates from
+README "Where to go next", to be picked one at a time: streaming (SSE), JSONL sessions
+with crash recovery, an Anthropic-native client, and per-tool approval allowlists (the
+named T6 follow-up).
