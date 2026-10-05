@@ -298,3 +298,14 @@ reuses `SSEAssembler` ideas but has a different event grammar. Provider catalog 
 `anthropic` with key from `ANTHROPIC_API_KEY` (borrowing policy consistent with T1).
 Tests: scripted HTTP stubs, network-free, covering tool-call round-trip and system
 placement.
+
+## T7a — OpenRouter provider profile (implemented)
+
+Small companion to T7: OpenRouter speaks the standard OpenAI Chat Completions
+dialect, so it needed only a `ProviderProfile` ("openrouter",
+`https://openrouter.ai/v1`, `OPENROUTER_API_KEY`, `vendor/model` ids such as
+`anthropic/claude-sonnet-4.5`, `keyResolution: .envOnly` — no pi borrowing). It was
+appended to `autodetectOrder` after `openai` so a present env key autodetects.
+Covered by a ProviderTests case (not in autodetect without a key; env-key autodetect;
+explicit `--provider openrouter` yields no credential). README provider table and
+autodetect order updated.

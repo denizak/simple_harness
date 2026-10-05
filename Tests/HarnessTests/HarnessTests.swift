@@ -173,6 +173,21 @@ struct ProviderTests {
         #expect(both.provider == "zai")
     }
 
+    @Test("openrouter: opt-in via env key or --provider, vendor/model ids")
+    func openRouter() {
+        let none = Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot())
+        #expect(none.provider != "openrouter")  // not in autodetect order
+
+        let byEnv = Config.resolve(arguments: [], env: ["OPENROUTER_API_KEY": "or-key"], pi: PIConfigSnapshot())
+        #expect(byEnv.provider == "openrouter")
+        #expect(byEnv.baseURL == "https://openrouter.ai/v1")
+        #expect(byEnv.model == "anthropic/claude-sonnet-4.5")
+        #expect(byEnv.apiKey == "or-key")
+
+        let explicit = Config.resolve(arguments: ["--provider", "openrouter"], env: [:], pi: PIConfigSnapshot())
+        #expect(explicit.provider == "openrouter" && explicit.apiKey == "none")  // no borrowing for openrouter
+    }
+
     @Test("coding plan endpoints are opt-in")
     func codingPlans() {
         let cn = Config.resolve(arguments: ["--provider", "zai-coding-cn"], env: [:], pi: PIConfigSnapshot())

@@ -99,9 +99,10 @@ All providers speak the OpenAI Chat Completions dialect — one client covers al
 | `deepseek` | `export DEEPSEEK_API_KEY=…` — or borrow the key pi has stored in `~/.pi/agent/auth.json` automatically | `deepseek-flash` |
 | `openai` (ChatGPT) | `export OPENAI_API_KEY=sk-…` | `gpt-4o-mini` |
 | `zai` (Z.ai / Zhipu GLM) | `export ZAI_API_KEY=…` | `glm-4.6` |
+| `openrouter` | `export OPENROUTER_API_KEY=…` — 100+ models behind one key; model ids are `vendor/model` strings | `anthropic/claude-sonnet-4.5` |
 
 Autodetect: the first provider with a key in the environment wins, in the
-order **ollama-cloud → zai → deepseek → openai** (set `--provider` to be
+order **ollama-cloud → zai → deepseek → openai → openrouter** (set `--provider` to be
 explicit). pi-stored keys (`auth.json`) are borrowed for named providers —
 `--provider deepseek` / `zai-coding-cn` work with zero setup. DeepSeek is the
 one profile that also permits a borrowed key to satisfy autodetection; explicit

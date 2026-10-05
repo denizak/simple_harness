@@ -144,6 +144,16 @@ public extension Config {
             defaultModel: "deepseek-flash",
             keyResolution: .envThenBorrowForAutodetect(piAuthEntry: "deepseek")
         ),
+        // OpenRouter: multi-model router speaking the standard OpenAI
+        // Chat Completions dialect (including SSE streaming). Model ids are
+        // "vendor/model" strings, e.g. anthropic/claude-sonnet-4.5.
+        // Docs: https://openrouter.ai/docs
+        "openrouter": ProviderProfile(
+            name: "openrouter",
+            baseURL: "https://openrouter.ai/v1",
+            envKeys: ["OPENROUTER_API_KEY"],
+            defaultModel: "anthropic/claude-sonnet-4.5"
+        ),
         // Ollama Cloud: same OpenAI-compatible API as the local server, but
         // models run in Ollama's datacenter. Model ids are the raw tags from
         // https://ollama.com/api/tags — the ":cloud" suffix is only for a
@@ -170,7 +180,7 @@ public extension Config {
     /// Provider ids checked, in order, when no --provider flag is given:
     /// the first one with an API key in the environment wins. Coding-plan
     /// profiles are deliberately absent — their quota is opt-in only.
-    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai"]
+    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai", "openrouter"]
 }
 
 // ---------------------------------------------------------------------------
