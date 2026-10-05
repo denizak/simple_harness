@@ -286,18 +286,36 @@ current end of file.
 config means zero logging, exactly the pre-T6.5 behavior. 70 tests pass (64 prior +
 6 new); selftest and `--session-log` smoke run verified.
 
-## Next task — T7: Anthropic-native client (planned, not started)
+## T7 — Anthropic-native client (implemented, this worktree, uncommitted)
 
-README "Where to go next" #4. Implement `ChatModel` for the native Messages API
-(`https://api.anthropic.com/v1/messages`) alongside `OpenAICompatClient`, and compare
-the two tool-use protocols in a short write-up. Key mapping: `tool_calls` array →
-`tool_use` content blocks; tool results → `tool_result` blocks in a `user` message;
-`tools` spec shape (`input_schema` vs `parameters`); `system` as a top-level parameter,
-not a message. Streaming via the Messages API SSE event types (`content_block_delta`)
-reuses `SSEAssembler` ideas but has a different event grammar. Provider catalog gains
-`anthropic` with key from `ANTHROPIC_API_KEY` (borrowing policy consistent with T1).
-Tests: scripted HTTP stubs, network-free, covering tool-call round-trip and system
-placement.
+README "Where to go next" #4, as planned in the previous revision of this document.
+
+Landed as: `Sources/HarnessCore/AnthropicClient.swift` (`AnthropicClient`: non-streaming
+`complete` + streaming `stream` conforming to `ChatModel`; `AnthropicSSEAssembler` with
+typed-event grammar; `StaticAnthropicModels` for `/models`), provider catalog entry
+`anthropic` (base URL `https://api.anthropic.com/v1`, key from `ANTHROPIC_API_KEY`,
+borrowing policy consistent with T1, `ANTHROPIC_BASE_URL` + explicit `--anthropic-base-url`
+override for local proxies) in `Config.swift`/`Providers.swift`, CLI flag in
+`Sources/harness/Harness.swift`, request/response/streaming mappings offline-covered by
+`Tests/HarnessTests/AnthropicClientTests.swift` (10 network-free tests via a local HTTP
+stub + in-memory JSON), and a new README section "Two tool protocols (OpenAI vs
+Anthropic)" with the full mapping table.
+
+Design points: `system` hoisted to the top-level parameter; `tool_calls` → `tool_use`
+blocks and `role: "tool"` results → `tool_result` blocks inside the next `user` message;
+`arguments` string-encoded ↔ `input` structured; `stop_reason` mapped to the neutral
+`stop`/`tool_calls`/`length` three; streaming is a typed event grammar
+(`content_block_start` / `input_json_delta` / `message_delta`) rather than delta
+fragments, with partial-JSON reassembly for fragmented tool arguments. The neutral
+`Message`/`AssistantTurn` wire format is unchanged — the agent loop is dialect-blind.
+
+**Comparison summary (see README table for detail):** same conceptual tool protocol,
+their wire encodings differ — OpenAI encodes tool arguments as strings and pairs results by
+`tool_call_id` in separate messages; Anthropic encodes them as structured JSON blocks
+and pairs by block order within one user message. Anthropic's streaming grammar is
+typed per content block; OpenAI's is per-delta. Nothing in the loop changes; only the
+client conformer + `SSEAssembler` differ, which is exactly what the `ChatModel`
+abstraction was supposed to buy.
 
 ## T7a — OpenRouter provider profile (implemented)
 

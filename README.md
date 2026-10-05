@@ -242,8 +242,31 @@ be reached from tests only via `@testable import`.
    line and compaction journals a `replace` event, so a crash loses at most
    the in-flight turn. `/save` + `/load` still own resuming (model/endpoint
    state is not part of a transcript).
-4. **A second client** — implement `ChatModel` for Anthropic's native
-   Messages API and compare the tool-use protocols.
+4. **A second client** (done — `AnthropicClient` in
+   `Sources/HarnessCore/AnthropicClient.swift`; `anthropic` provider in the catalog,
+   `ANTHROPIC_API_KEY`, streaming + `/models`) — the native Messages API client; see
+   "Two tool protocols" below.
 5. **Sub-agents** (done — `spawn_agent` in `Sources/HarnessCore/Tools.swift`,
    depth-limited per T3 and approval-aware per T6) — expose "spawn a fresh
    harness" as a tool.
+
+## Two tool protocols (OpenAI vs Anthropic)
+
+`Agent.swift` consumes the same neutral `Message`/`ToolCall`/`AssistantTurn` wire
+format from both clients — the loop doesn't know which dialect produced it. The
+conformers translate:
+
+| Concept | OpenAI `/chat/completions` | Anthropic `/v1/messages` |
+|---|---|---|
+| System prompt | A system `role` message (hoisted client-side) | Top-level `system` parameter, not a message |
+| Tool spec | `{"type":"function","function":{"parameters"}}` | `{"name","description","input_schema"}` |
+| Model calls tool | Assistant `tool_calls` array + empty content | `tool_use` content block (`id`,`name`,`input`) |
+| Tool result | `role: "tool"` message + `tool_call_id` | `tool_result` block inside the next `user` message |
+| Arguments | String-encoded JSON (`arguments`) | Structured JSON (`input`) — re-encoded for the neutral format |
+| Finish reason | `finish_reason`: `stop`/`tool_calls`/`length` | `stop_reason`: `end_turn`/`tool_use`/`max_tokens` — mapped to the same three |
+| Streaming | `data: {...}` with `delta.tool_calls` index fragments | Typed events: `content_block_start`, `input_json_delta`, `message_delta` |
+| Usage | `usage.prompt/completion_tokens` | `usage.input/output_tokens` (per-message + `message_delta`) |
+
+Auth differs too: OpenAI uses `Authorization: Bearer`, Anthropic uses `x-api-key` +
+`anthropic-version`. See `Sources/HarnessCore/AnthropicClient.swift` for the full
+mapping, and `Selftest.anthropicChecks()` for an offline tour of it.

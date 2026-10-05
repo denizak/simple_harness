@@ -144,6 +144,16 @@ public extension Config {
             defaultModel: "deepseek-flash",
             keyResolution: .envThenBorrowForAutodetect(piAuthEntry: "deepseek")
         ),
+        // Anthropic: the one catalog provider that does NOT speak the
+        // OpenAI dialect — AnthropicClient implements the native Messages
+        // API (content blocks, tool_use/tool_result, x-api-key auth).
+        // Docs: https://docs.anthropic.com
+        "anthropic": ProviderProfile(
+            name: "anthropic",
+            baseURL: "https://api.anthropic.com/v1",
+            envKeys: ["ANTHROPIC_API_KEY"],
+            defaultModel: "claude-sonnet-4-5"
+        ),
         // OpenRouter: multi-model router speaking the standard OpenAI
         // Chat Completions dialect (including SSE streaming). Model ids are
         // "vendor/model" strings, e.g. anthropic/claude-sonnet-4.5.
@@ -180,7 +190,7 @@ public extension Config {
     /// Provider ids checked, in order, when no --provider flag is given:
     /// the first one with an API key in the environment wins. Coding-plan
     /// profiles are deliberately absent — their quota is opt-in only.
-    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai", "openrouter"]
+    static let autodetectOrder = ["ollama-cloud", "zai", "deepseek", "openai", "openrouter", "anthropic"]
 }
 
 // ---------------------------------------------------------------------------

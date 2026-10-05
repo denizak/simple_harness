@@ -26,6 +26,7 @@ enum SelfTest {
         failures += typeSafeChecks()
         failures += reasoningChecks()
         failures += sseAssemblerChecks()
+        failures += anthropicChecks()
         failures += await loadPrecedenceChecks()
         failures += await approvalGateChecks()
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
@@ -369,6 +370,75 @@ enum SelfTest {
               assembled.toolCalls.first.map { "\($0.function.name) \($0.function.arguments)" } ?? "none")
         check("SSE: finish reason + usage captured",
               assembled.finishReason == "tool_calls" && assembled.usage?.promptTokens == 10, "")
+        return failures
+    }
+
+    // ---- Anthropic Messages dialect: mappings without any network ---------
+    private static func anthropicChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            if !condition { failures += 1 }
+            print("  \(condition ? "✓" : "✗") \(name)\(condition ? "" : " — \(detail)")")
+        }
+        let config = Config(provider: "anthropic", baseURL: "https://api.anthropic.com/v1",
+                            apiKey: "k", model: "claude-sonnet-4-5")
+
+        // Request mapping: system hoisted, tool calls become tool_use blocks.
+        let call = ToolCall(id: "t1", function: .init(name: "bash", arguments: #"{"cmd":"ls"}"#))
+        let messages: [Message] = [.system("be terse"), .user("run it"),
+                                   Message(role: "assistant", content: nil, toolCalls: [call]),
+                                   .tool(result: "out", for: call)]
+        let body = AnthropicClient.requestBody(messages, tools: [], config: config)
+        check("anthropic: system hoisted to parameter", body["system"]?.stringValue == "be terse")
+        let turns = body["messages"]?.arrayValue ?? []
+        check("anthropic: 3 mapped messages (system excluded)", turns.count == 3, "\(turns.count)")
+        let assistantBlocks = turns[1].objectValue?["content"]?.arrayValue
+        check("anthropic: tool_use block with parsed input",
+              assistantBlocks?.first?.objectValue?["type"]?.stringValue == "tool_use"
+                  && assistantBlocks?.first?.objectValue?["input"]?.objectValue?["cmd"]?.stringValue == "ls")
+        let resultBlock = turns[2].objectValue
+        check("anthropic: tool result is a user tool_result block",
+              resultBlock?["role"]?.stringValue == "user"
+                  && resultBlock?["content"]?.arrayValue?.first?.objectValue?["type"]?.stringValue == "tool_result")
+
+        // Response mapping: blocks → AssistantTurn, stop_reason translated.
+        if let response = JSONValue.parse(
+            """
+            {"content":[{"type":"tool_use","id":"t9","name":"grep","input":{"pattern":"x"}}],
+             "stop_reason":"tool_use","usage":{"input_tokens":12,"output_tokens":7}}
+            """
+        ), let turn = try? AnthropicClient.turn(from: response) {
+            check("anthropic: response decodes to tool_calls turn",
+                  turn.finishReason == "tool_calls" && turn.toolCalls.count == 1
+                      && turn.toolCalls[0].function.arguments == "{\"pattern\":\"x\"}"
+                      && turn.usage?.promptTokens == 12)
+        } else {
+            check("anthropic: response decodes to tool_calls turn", false, "parse/decode failed")
+        }
+
+        // Streaming grammar: typed events with input_json_delta fragments.
+        var assembler = AnthropicSSEAssembler()
+        let events = [
+            #"{"type":"message_start","message":{"usage":{"input_tokens":10}}}"#,
+            #"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"c1","name":"bash"}}"#,
+            #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":"}}"#,
+            #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"ls\"}"}}"#,
+            #"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}"#,
+        ]
+        for event in events {
+            guard let parsed = JSONValue.parse(event) else {
+                check("anthropic SSE: event parses", false, event)
+                continue
+            }
+            _ = assembler.ingest(parsed)
+        }
+        let assembled = assembler.assembled()
+        check("anthropic SSE: tool_use assembled from partial_json deltas",
+              assembled.toolCalls.count == 1 && assembled.toolCalls[0].function.arguments == "{\"cmd\":\"ls\"}"
+                  && assembled.toolCalls[0].id == "c1",
+              assembled.toolCalls.first.map { "\($0.function.name) \($0.function.arguments)" } ?? "none")
+        check("anthropic SSE: stop_reason + usage captured",
+              assembled.finishReason == "tool_calls" && assembled.usage?.completionTokens == 5, "")
         return failures
     }
 

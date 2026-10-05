@@ -120,7 +120,7 @@ struct HarnessMain {
         }
 
         var messages: [Message] = [.system(systemPrompt(for: config))]
-        var agent = Agent(config: config, model: OpenAICompatClient(config: config))
+        var agent = Agent(config: config, model: makeChatModel(for: config))
 
         var retryAvailable = false
 
@@ -237,7 +237,7 @@ struct HarnessMain {
             if argument.isEmpty {
                 print(AgentUI.dim("model: \(agent.config.model)"))
             } else {
-                agent.selectModel(argument) { OpenAICompatClient(config: $0) }
+                agent.selectModel(argument) { makeChatModel(for: $0) }
                 print(AgentUI.dim("model → \(argument)"))
             }
         case "/tools":
@@ -246,7 +246,7 @@ struct HarnessMain {
             // Lists what the CURRENT provider offers (GET {baseURL}/models) —
             // with Ollama Cloud that's the whole cloud catalog.
             do {
-                let models = try await OpenAICompatClient(config: agent.config).listModels()
+                let models = try await makeChatModel(for: agent.config).listModels()
                 print(AgentUI.dim(models.joined(separator: "\n")))
             } catch {
                 print(AgentUI.errorText("error: \(error)"))
@@ -266,7 +266,7 @@ struct HarnessMain {
                 // Precedence policy lives on Session.restoreModel — the model
                 // applies only when the session ran on the same endpoint.
                 if let restored = session.restoreModel(activeBaseURL: agent.config.baseURL) {
-                    agent.selectModel(restored) { OpenAICompatClient(config: $0) }
+                    agent.selectModel(restored) { makeChatModel(for: $0) }
                     print(AgentUI.dim("loaded \(session.messages.count) messages (\(restored))"))
                 } else {
                     print(AgentUI.warn(

@@ -49,6 +49,21 @@ public extension ChatModel {
         if !turn.text.isEmpty { onText(turn.text) }
         return turn
     }
+
+    /// GET {baseURL}/models — used by the REPL's /models command. The
+    /// OpenAI-compatible envelope is the norm, but conformers may override
+    /// (AnthropicClient does, for the same {"data":[{"id"…}]} shape).
+    func listModels() async throws -> [String] {
+        throw LLMError(status: 0, body: "model listing not supported by this client")
+    }
+}
+
+/// Client selection by provider id: the one place that knows which dialect
+/// each catalog provider speaks. Agent construction, /model, /load and
+/// /models all route through this factory so a provider switch always swaps
+/// the client with it.
+public func makeChatModel(for config: Config) -> ChatModel {
+    config.provider == "anthropic" ? AnthropicClient(config: config) : OpenAICompatClient(config: config)
 }
 
 public struct LLMError: Error, CustomStringConvertible {
