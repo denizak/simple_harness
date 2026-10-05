@@ -227,14 +227,12 @@ auto-approver (a natural follow-up: classifier *suggests*, human decides).
 
 ## Completion status
 
-T1–T6 all implemented with offline tests. Latest macOS verification (at `f004251`):
-`swift test` passed (64 tests), `swift run harness --selftest` passed, `swift build -c
-release` passed, `git diff --check` clean. An isolated `--once` run against a refused
-localhost endpoint returned exit status 1.
-
-Post-T6 hardening already merged: `@`-file completion with arrow-key navigation and
-substring `@`-token matching (`e27aeef`, `4cce27e`) and ShellRunner pipe-drain/EINTR
-fixes (`13f63bc`, `f004251`). Linux CI has not yet been confirmed against these commits.
+T1–T6 all implemented with offline tests, plus post-T6 hardening (`@`-file completion:
+`e27aeef`, `4cce27e`, `b7d7bc0`; ShellRunner pipe-drain/EINTR: `13f63bc`, `f004251`) and
+T6.5 (JSONL session log, `e666889`). Latest macOS verification (at `e666889`):
+`swift test` passed (70 tests), `swift run harness --selftest` passed, `swift build -c
+release` passed, `git diff --check` clean. Linux CI has not yet been confirmed against
+recent commits.
 
 ## Shared completion gate
 
@@ -287,3 +285,16 @@ current end of file.
 **Default is OFF:** the agent's `log` is lazily built from `config.sessionLog`; nil
 config means zero logging, exactly the pre-T6.5 behavior. 70 tests pass (64 prior +
 6 new); selftest and `--session-log` smoke run verified.
+
+## Next task — T7: Anthropic-native client (planned, not started)
+
+README "Where to go next" #4. Implement `ChatModel` for the native Messages API
+(`https://api.anthropic.com/v1/messages`) alongside `OpenAICompatClient`, and compare
+the two tool-use protocols in a short write-up. Key mapping: `tool_calls` array →
+`tool_use` content blocks; tool results → `tool_result` blocks in a `user` message;
+`tools` spec shape (`input_schema` vs `parameters`); `system` as a top-level parameter,
+not a message. Streaming via the Messages API SSE event types (`content_block_delta`)
+reuses `SSEAssembler` ideas but has a different event grammar. Provider catalog gains
+`anthropic` with key from `ANTHROPIC_API_KEY` (borrowing policy consistent with T1).
+Tests: scripted HTTP stubs, network-free, covering tool-call round-trip and system
+placement.
