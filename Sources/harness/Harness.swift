@@ -89,6 +89,10 @@ struct HarnessMain {
                                       gated tool calls (default never; env
                                       HARNESS_APPROVAL; REPL-only prompts)
                   --no-streaming    disable SSE streaming
+                  --session-log PATH  append a JSONL transcript line-by-line
+                                      (crash-safe; off by default — /save
+                                      remains the way to resume a session)
+                  --no-session-log  disable it (overrides file/env)
                   --max-turns N     turn cap per task (default 25)
                   --typesafe-key KEY   TypeSafe API key override
                   --once TASK       run one task non-interactively (nonzero exit on failure)

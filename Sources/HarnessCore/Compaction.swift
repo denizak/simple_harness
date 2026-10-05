@@ -99,7 +99,8 @@ public enum Compaction {
     public static func compactIfNeeded(
         _ messages: inout [Message],
         config: Config,
-        model: ChatModel
+        model: ChatModel,
+        journal: JSONLSessionLog? = nil
     ) async {
         let total = size(of: messages)
         guard total > config.compactAboveBytes else { return }
@@ -136,6 +137,10 @@ public enum Compaction {
         guard newSize < total - minGain else { return }
 
         messages = candidate
+        // The append-only log cannot express a wholesale rewrite as an
+        // append — journal a `replace` so loaders replay the new state
+        // instead of piling the summary on top of the full old history.
+        journal?.replace(with: candidate)
         print(AgentUI.dim(
             "🧹 compacted \(older.count) older messages (\(total) → \(newSize) bytes)"
         ))

@@ -25,6 +25,10 @@ public struct Config: Sendable {
     public var baseURL: String
     public var apiKey: String
     public var model: String
+    /// JSONL session log path; nil = OFF (single-file /save stays the default).
+    /// The agent appends one line per message as the run progresses, so a
+    /// crash can lose at most the in-flight turn, never the whole transcript.
+    public var sessionLog: String?
     public var maxTokens: Int = 4096
     /// Hard cap on model turns per user task (loop safety belt).
     public var maxTurns: Int = 25
@@ -74,6 +78,7 @@ public struct Config: Sendable {
         baseURL: String,
         apiKey: String,
         model: String,
+        sessionLog: String? = nil,
         maxTokens: Int = 4096,
         maxTurns: Int = 25,
         maxToolOutput: Int = 20_000,
@@ -93,6 +98,7 @@ public struct Config: Sendable {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
+        self.sessionLog = sessionLog
         self.maxTokens = maxTokens
         self.maxTurns = maxTurns
         self.maxToolOutput = maxToolOutput
@@ -249,6 +255,10 @@ public struct Config: Sendable {
             if let raw = value("--max-turns", nil), let parsed = Int(raw), parsed > 0 {
                 config.maxTurns = parsed
             }
+            if let raw = value("--session-log", nil), !raw.isEmpty {
+                config.sessionLog = raw
+            }
+            if arguments.contains("--no-session-log") { config.sessionLog = nil }
             if let raw = value("--gate-threshold", nil), let parsed = Double(raw),
                parsed > 0, parsed < 1 {
                 config.gateThreshold = parsed

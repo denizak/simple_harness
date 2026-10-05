@@ -227,14 +227,22 @@ be reached from tests only via `@testable import`.
 
 ## Where to go next (exercises)
 
-1. **Streaming (SSE)** — parse `data: {...}` chunks from
-   `/chat/completions` with `URLSession.bytes(for:)`; print tokens as they
-   arrive.
+1. **Streaming (SSE)** (done — `OpenAICompatClient.stream` + `SSEAssembler` in
+   `Sources/HarnessCore/LLMClient.swift`, wired into the agent turn loop) —
+   parse `data: {...}` chunks from `/chat/completions` with
+   `URLSession.bytes(for:)`, print tokens as they arrive, reassemble
+   delta-fragmented tool calls.
 2. **Tool-approval gate** (done — see `Sources/HarnessCore/Approval.swift`;
    `--approval` / `HARNESS_APPROVAL`) — confirm before `bash` runs; per-tool
    allowlists are the natural follow-up.
-3. **JSONL sessions** — append one line per message instead of rewriting a
-   JSON blob (pi's `session-format.md`); enables crash recovery.
+3. **JSONL sessions** (done — `Sources/HarnessCore/JSONLSession.swift`; opt in
+   with `--session-log PATH`) — append one line per message instead of
+   rewriting a JSON blob (pi's `session-format.md`); the log is fsync'd per
+   line and compaction journals a `replace` event, so a crash loses at most
+   the in-flight turn. `/save` + `/load` still own resuming (model/endpoint
+   state is not part of a transcript).
 4. **A second client** — implement `ChatModel` for Anthropic's native
    Messages API and compare the tool-use protocols.
-5. **Sub-agents** — expose "spawn a fresh harness" as a tool.
+5. **Sub-agents** (done — `spawn_agent` in `Sources/HarnessCore/Tools.swift`,
+   depth-limited per T3 and approval-aware per T6) — expose "spawn a fresh
+   harness" as a tool.

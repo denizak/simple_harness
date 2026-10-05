@@ -67,6 +67,16 @@ public struct Agent {
     /// Nil means "not recording" — the rule still consults policy each time.
     public var approvalState: ApprovalState?
 
+    /// Opt-in append-only transcript (JSONLSession.swift). Created from
+    /// config when nil: every append/replace below also journals here, so a
+    /// crash can lose at most the in-flight turn. Failure to open is a
+    /// no-op, never a run-stopper.
+    private var log: JSONLSessionLog? {
+        get { _log ?? config.sessionLog.flatMap { try? JSONLSessionLog(path: $0) } }
+        set { _log = newValue }
+    }
+    private var _log: JSONLSessionLog?
+
     /// Per-top-level-task: start with a clean "always allow" slate. A new
     /// `run(task:)` must re-prompt for everything the previous task approved;
     /// `/retry` goes through continueRun instead, so a retry of the same
@@ -110,6 +120,7 @@ public struct Agent {
         // approvals out from under the shared state.
         if depth == 0 { resetApprovalState() }
         messages.append(.user(input))
+        log?.append(message: .user(input))
         try await continueRun(messages: &messages)
     }
 
@@ -125,7 +136,7 @@ public struct Agent {
             // Cheap size check before every model call; only when the history
             // exceeds config.compactAboveBytes does it summarize older turns
             // (see Compaction.swift). No-op for short sessions.
-            await Compaction.compactIfNeeded(&messages, config: config, model: model)
+            await Compaction.compactIfNeeded(&messages, config: config, model: model, journal: log)
 
             // ---- 1. Ask the model for its next move (streamed when on) ------
             // With streaming, visible text is printed fragment-by-fragment as
@@ -156,6 +167,7 @@ public struct Agent {
                 name: nil
             )
             messages.append(assistantMessage)
+            log?.append(message: assistantMessage)
 
             if let usage = turn.usage {
                 let tokens = usage.promptTokens + usage.completionTokens
@@ -179,6 +191,7 @@ public struct Agent {
             for call in turn.toolCalls {
                 let result = await execute(call)
                 messages.append(.tool(result: result, for: call))
+                log?.append(message: .tool(result: result, for: call))
             }
             // (All results go in before the next model call — the wire format
             // wants every tool_call answered exactly once.)

@@ -255,3 +255,35 @@ All tasks T1–T6 are complete; this roadmap is retired. Remaining candidates fr
 README "Where to go next", to be picked one at a time: streaming (SSE), JSONL sessions
 with crash recovery, an Anthropic-native client, and per-tool approval allowlists (the
 named T6 follow-up).
+
+## T6.5 — JSONL session log (implemented)
+
+README "Where to go next" #3. Landed as `Sources/HarnessCore/JSONLSession.swift`
+(`SessionEvent`, `JSONLSessionLog`), `Config.sessionLog` resolved from `--session-log`
+/ `HARNESS_SESSION_LOG` (with `--no-session-log` override), journal hooks in
+`Agent.run`/`continueRun` (user, assistant, tool-result appends) plus
+`Compaction.compactIfNeeded(_:config:model:journal:)`, and
+`Tests/HarnessTests/JSONLSessionTests.swift` (6 tests).
+
+**Design:** an append-only *event* stream, not a message mirror. One JSON object per
+line: `{"kind":"append", "message": …}` or `{"kind":"replace", "messages":[…]}`.
+Compaction rewrites the in-memory history wholesale, so it journals a `replace` the
+loader replays as "history is now exactly this" — no watermark bookkeeping. Writes go
+through a serial queue onto an `O_APPEND` fd and `fsync` per line, so parent and
+spawned sub-agents share one log safely and a crash loses at most the in-flight turn.
+`load` skips corrupt lines (a torn tail is normal after a crash) and returns empty for
+a missing file.
+
+**Scope line:** this covers *durability* only. `/save` + `/load` remain the resume
+mechanism: resuming needs model/endpoint state (`Session.restoreModel`) that a
+transcript does not carry, and a restored log is never re-saved as a session blob.
+
+**Test that caught a real bug:** the replace-event test opens two writers on one path;
+the first draft used `FileHandle.seekToEndOfFile`, whose offset is fixed at open time —
+the second writer clobbered the first one's line (restored history came back empty).
+Switched to raw `open(O_WRONLY|O_APPEND)` so the kernel re-anchors every write to the
+current end of file.
+
+**Default is OFF:** the agent's `log` is lazily built from `config.sessionLog`; nil
+config means zero logging, exactly the pre-T6.5 behavior. 70 tests pass (64 prior +
+6 new); selftest and `--session-log` smoke run verified.
