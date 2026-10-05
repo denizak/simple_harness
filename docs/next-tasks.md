@@ -2,6 +2,10 @@
 
 Originally planned against baseline `c96ad42`. T1–T5 were implemented in order in that worktree; T6 was planned against `4d7ba3a` and is now implemented (`a566d93`). This document is a historical record — current status lives in "Completion status" below.
 
+**Status: T1–T7a all implemented and merged to `main`.** The roadmap items from README
+"Where to go next" are complete; the one remaining named follow-up is the per-tool
+approval allowlist (T6's deferred refinement).
+
 ## Baseline and order
 
 `swift test` on this workstation: 23 tests, two failing tests with three failed expectations. Both failing tests assume particular API-key entries exist whenever the user's auth file exists. No live provider tests were run.
@@ -228,11 +232,12 @@ auto-approver (a natural follow-up: classifier *suggests*, human decides).
 ## Completion status
 
 T1–T6 all implemented with offline tests, plus post-T6 hardening (`@`-file completion:
-`e27aeef`, `4cce27e`, `b7d7bc0`; ShellRunner pipe-drain/EINTR: `13f63bc`, `f004251`) and
-T6.5 (JSONL session log, `e666889`). Latest macOS verification (at `e666889`):
-`swift test` passed (70 tests), `swift run harness --selftest` passed, `swift build -c
-release` passed, `git diff --check` clean. Linux CI has not yet been confirmed against
-recent commits.
+`e27aeef`, `4cce27e`, `b7d7bc0`; ShellRunner pipe-drain/EINTR: `13f63bc`, `f004251`),
+T6.5 (JSONL session log, `e666889`), T7 (Anthropic-native client, `371322a`), and T7a
+(OpenRouter provider profile, `ec13406`). Latest macOS verification (at `371322a`):
+`swift test` passed (80 tests), `swift run harness --selftest` passed, `swift build -c
+release` passed, `git diff --check` clean. History through `ec13406` is pushed to
+`origin/main`. Linux CI has not yet been confirmed against recent commits.
 
 ## Shared completion gate
 
@@ -249,10 +254,10 @@ Confirm macOS and Linux CI before merging portability-sensitive changes. Do not 
 
 ## After these fixes
 
-All tasks T1–T6 are complete; this roadmap is retired. Remaining candidates from
-README "Where to go next", to be picked one at a time: streaming (SSE), JSONL sessions
-with crash recovery, an Anthropic-native client, and per-tool approval allowlists (the
-named T6 follow-up).
+Roadmap status: streaming (SSE), JSONL sessions, an Anthropic-native client (T7), and
+T7a OpenRouter are all implemented (see below). The remaining candidate to pick next is
+**per-tool approval allowlists** — the explicitly named T6 follow-up (README "Where to
+go next" #2).
 
 ## T6.5 — JSONL session log (implemented)
 
@@ -286,7 +291,7 @@ current end of file.
 config means zero logging, exactly the pre-T6.5 behavior. 70 tests pass (64 prior +
 6 new); selftest and `--session-log` smoke run verified.
 
-## T7 — Anthropic-native client (implemented, this worktree, uncommitted)
+## T7 — Anthropic-native client (implemented, `371322a`)
 
 README "Where to go next" #4, as planned in the previous revision of this document.
 
