@@ -81,6 +81,15 @@ public enum AgentEvalSupport {
         return Int(first.dropFirst("exit code: ".count).prefix { $0.isNumber || $0 == "-" }) ?? -1
     }
 
+    /// The first `error:` line of a harness run's output (ANSI colour stripped), if any.
+    public static func errorLine(in report: String) -> String? {
+        for line in report.split(separator: "\n") {
+            let plain = line.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            if plain.hasPrefix("error:") { return String(plain.prefix(300)) }
+        }
+        return nil
+    }
+
     public static func timedOut(_ report: String) -> Bool {
         (report.split(separator: "\n").first.map(String.init) ?? "").contains("(timed out)")
     }
@@ -167,6 +176,9 @@ public struct AgentEvalReport: Codable, Sendable {
     public var budgetUSD: Double
     public var totalCostUSD: Double
     public var skippedRuns: Int
+    /// Set when the run stopped early because the harness could not even reach
+    /// the model (bad key, dead endpoint) — a setup problem, not a result.
+    public var abortedReason: String?
     public var cases: [AgentEvalCaseSummary]
     public var runs: [AgentEvalRun]
 }
@@ -217,6 +229,7 @@ public enum AgentEval {
         var results: [AgentEvalRun] = []
         var spent = 0.0
         var index = 0
+        var abortedReason: String?
         while index < jobs.count, spent < budgetUSD {
             let chunk = Array(jobs[index..<min(index + max(1, parallel), jobs.count)])
             index += chunk.count
@@ -237,6 +250,14 @@ public enum AgentEval {
                     + "\(result.turns) turns, \(result.inputTokens + result.outputTokens) tok, \(result.wallMs / 1000)s")
             }
             results += finished
+            // A whole batch that never made a single model turn and exited
+            // nonzero is a setup failure (401, dead endpoint…): stop, don't
+            // grind through every remaining run and print a misleading 0%.
+            if !finished.isEmpty, finished.allSatisfy({ $0.turns == 0 && $0.harnessExit != 0 }) {
+                abortedReason = finished.compactMap(\.checkOutput).first(where: { $0.contains("error:") })
+                    ?? "the harness exited without making a model call"
+                break
+            }
         }
         // Passes leave nothing behind; failures keep their dirs for debugging.
         if !results.contains(where: { $0.artifactDir != nil }) { try? FileManager.default.removeItem(atPath: scratch) }
@@ -244,7 +265,8 @@ public enum AgentEval {
         return AgentEvalReport(
             date: ISO8601DateFormatter().string(from: Date()), provider: provider, model: model,
             runsPerCase: runsPerCase, budgetUSD: budgetUSD, totalCostUSD: spent,
-            skippedRuns: jobs.count - results.count, cases: summarize(results), runs: results)
+            skippedRuns: jobs.count - results.count, abortedReason: abortedReason,
+            cases: summarize(results), runs: results)
     }
 
     private static func execute(
@@ -297,9 +319,10 @@ public enum AgentEval {
         let toolMissing = testCase.requiresTool.map { (stats.toolCounts[$0] ?? 0) == 0 } ?? false
         result.passed = checkPassed && !toolMissing
         if !result.passed {
-            result.checkOutput = checkPassed
+            let harnessError = totals.turns == 0 ? AgentEvalSupport.errorLine(in: report) : nil
+            result.checkOutput = harnessError ?? (checkPassed
                 ? "check passed but required tool '\(testCase.requiresTool ?? "")' was never called"
-                : String(check.prefix(400))
+                : String(check.prefix(400)))
             result.artifactDir = root
             try? report.write(toFile: meta + "/stdout.txt", atomically: true, encoding: .utf8)
         } else {
@@ -346,12 +369,16 @@ public enum AgentEval {
         let groups = byGroup.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value.0)/\($0.value.1)" }.joined(separator: ", ")
         lines.append("pass rate: \(passed)/\(total)" + (total > 0 ? String(format: " (%.0f%%)", Double(passed) / Double(total) * 100) : "")
             + "  —  \(groups)")
+        if let reason = report.abortedReason {
+            lines.insert("ABORTED — setup problem, not a result: \(reason)", at: 0)
+        }
         let compacted = report.runs.filter { ($0.compactions ?? 0) > 0 }.count
         if compacted > 0 { lines.append("runs where compaction fired: \(compacted)/\(total)") }
         let timeouts = report.runs.filter(\.timedOut).count
         let capped = report.runs.filter { !$0.passed && $0.harnessExit != 0 && !$0.timedOut }.count
         lines.append("failed runs that timed out: \(timeouts); ended with a harness error/turn cap: \(capped)"
-            + (report.skippedRuns > 0 ? "; \(report.skippedRuns) runs skipped (budget)" : ""))
+            + (report.skippedRuns > 0
+                ? "; \(report.skippedRuns) runs skipped (\(report.abortedReason != nil ? "aborted" : "budget"))" : ""))
         lines.append(String(format: "total est. cost $%.4f of $%.2f cap (assumed prices, not billed)  —  %@ / %@",
                             report.totalCostUSD, report.budgetUSD, report.provider, report.model))
         return lines.joined(separator: "\n")

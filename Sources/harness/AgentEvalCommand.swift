@@ -69,6 +69,10 @@ enum AgentEvalCommand {
             model: modelName, runsPerCase: runs, parallel: parallel, budgetUSD: budget,
             progress: { print($0) })
         print(AgentEval.table(report))
+        if let reason = report.abortedReason {
+            print(AgentUI.errorText("aborted after the first batch: \(reason)"))
+            print(AgentUI.warn("check the provider key/endpoint (an exported <PROVIDER>_API_KEY beats keys in config files)."))
+        }
         for run in report.runs where run.artifactDir != nil {
             print(AgentUI.dim("  kept for debugging: \(run.artifactDir ?? "")  (\(run.caseID) #\(run.run))"))
         }

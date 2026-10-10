@@ -835,3 +835,13 @@ struct AgentEvalTests {
         #expect(AgentEvalPricing.cost(provider: "unknown", input: 1_000_000, output: 0) == 3)
     }
 }
+
+@Suite("agent eval setup-failure detection")
+struct AgentEvalAbortTests {
+    @Test("errorLine finds the harness error through ANSI colour codes")
+    func errorLine() {
+        let report = "exit code: 1\nstdout:\n\u{1B}[1msimple_harness\u{1B}[0m\n\u{1B}[31merror: model call failed — API error (HTTP 401)\u{1B}[0m\n"
+        #expect(AgentEvalSupport.errorLine(in: report)?.hasPrefix("error: model call failed") == true)
+        #expect(AgentEvalSupport.errorLine(in: "exit code: 0\nok") == nil)
+    }
+}
