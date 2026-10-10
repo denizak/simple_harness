@@ -426,7 +426,7 @@ public channel"), so a miss says little about the model. The gate group (10 case
 easy and all backends scored 100%, so **the gate threshold (0.45) remains untuned** — it needs
 borderline prompts from real use.
 
-## T10 — agent eval (implemented; not yet run live)
+## T10 — agent eval (implemented, `f7e5dac`)
 
 Grades outcomes, not prose: `AgentEval.swift` (library: case model, seeding, validation,
 runner, summary, table) + `AgentEvalCommand.swift` (`--eval-agent`, `--eval-validate`) +
@@ -450,8 +450,8 @@ non-issue), then runs the case's shell `check` (exit 0 = pass).
   a container.
 - **Tests (offline):** all shipped cases validate; validation catches a vacuous and an
   unsatisfiable check; shell-report parsing/quoting; usage-log append/totals; summary and
-  pricing. The runner's plumbing was smoke-tested against a dead local endpoint (spawn,
-  artifacts kept, report written, zero spend). **The live path has not been run.**
+  pricing. The runner's plumbing was first smoke-tested against a dead local endpoint (spawn,
+  artifacts kept, report written, zero spend), then run live (below).
 
 **Caveats:** 11 cases × a few runs is small — pass-rate differences under ~20 points are
 noise. Cases are synthetic and use python3 + POSIX tools, so they need both on `PATH`.
@@ -459,3 +459,13 @@ noise. Cases are synthetic and use python3 + POSIX tools, so they need both on `
 the stub-model tests). A forwarded config's `apiKey` still overrides provider env keys (the
 existing precedence), so pass `--eval-no-config` plus `--provider X` and export the key if
 results look like auth errors.
+
+**First live run (glm-5.3-flash via `zai-coding`, 11 cases × 3 runs):** 33/33 passed, 2–6 turns
+(~4.5 mean), ~25 s per run, 3k–13k tokens per run, est. $0.17 at assumed prices. The
+usage log, subprocess runner and report all work against a real provider. The set is too
+easy to separate agents — same ceiling the first naluri set hit — so for now it is a
+regression tripwire for the harness (a drop below 100% means a change broke something),
+not a capability measure. The failure paths (timeout, turn cap, kept artifacts) have not
+fired live. **Next:** harder cases — hidden stricter checks (so hardcoding the visible
+answer fails), misleading symptoms, larger search with decoys, underspecified tasks, long
+tasks that trigger compaction, a `spawn_agent` case — plus a run against a second model.
