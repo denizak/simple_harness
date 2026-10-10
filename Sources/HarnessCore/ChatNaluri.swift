@@ -28,7 +28,7 @@ struct ChatNaluri: NaluriBackend {
     /// Default naluri model per catalog provider (cheap "flash" tiers).
     static func defaultModel(for profile: ProviderProfile) -> String {
         switch profile.name {
-        case "zai", "zai-coding", "zai-coding-cn": return "glm-4.5-flash"
+        case "zai", "zai-coding", "zai-coding-cn": return "glm-5.3-flash"
         default: return profile.defaultModel
         }
     }

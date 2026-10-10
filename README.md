@@ -210,7 +210,7 @@ be reached from tests only via `@testable import`.
     file) and that provider's key. Each question is one tiny request limited to
     a single answer token; the probability comes from the server's `logprobs`
     normalised over the allowed tokens. Default models: `deepseek-flash`,
-    `glm-4.5-flash` (override: `HARNESS_NALURI_MODEL` / `--naluri-model`). If a
+    `glm-5.3-flash` (override: `HARNESS_NALURI_MODEL` / `--naluri-model`). If a
     provider returns no logprobs the answer is a one-hot pick, marked
     `[uncalibrated]`. The gate threshold means different things per model —
     re-tune `--gate-threshold` when switching backend.

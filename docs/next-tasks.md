@@ -355,7 +355,7 @@ probabilities, as the counterpart to the deliberate chat loop.
 - **Tests:** ChatNaluriTests (distribution, prompts, answer shape, backend
   selection); pure, no network.
 - **Unverified:** the live DeepSeek/GLM calls — whether each returns
-  `top_logprobs` and accepts `thinking: {type: disabled}` — and the `glm-4.5-flash`
+  `top_logprobs` and accepts `thinking: {type: disabled}` — and the `glm-5.3-flash`
   model id. A live e2e leg for the chat backend is not yet written.
 
 ## T9 — naluri eval (implemented)

@@ -644,7 +644,7 @@ struct ChatNaluriTests {
         config.naluriBackendName = "zai"
         config.provider = "zai"
         config.apiKey = "zk"
-        #expect((config.naluriBackend as? ChatNaluri)?.model == "glm-4.5-flash")
+        #expect((config.naluriBackend as? ChatNaluri)?.model == "glm-5.3-flash")
     }
 }
 
