@@ -2,7 +2,7 @@
 
 Originally planned against baseline `c96ad42`. T1–T5 were implemented in order in that worktree; T6 was planned against `4d7ba3a` and is now implemented (`a566d93`). This document is a historical record — current status lives in "Completion status" below.
 
-**Status: T1–T7a all implemented and merged to `main`.** The roadmap items from README
+**Status: T1–T8 all implemented and merged to `main`.** The roadmap items from README
 "Where to go next" are complete; the one remaining named follow-up is the per-tool
 approval allowlist (T6's deferred refinement).
 
@@ -226,7 +226,7 @@ uses.
 
 **Out of scope:** per-argument or per-command allowlists ("allow `git status`, deny
 `rm`"), path confinement, diff previews for `edit_file`, remote/mobile approval UIs,
-persisting approvals across restarts, and wiring the TypeSafe classifier in as an
+persisting approvals across restarts, and wiring the naluri classifier in as an
 auto-approver (a natural follow-up: classifier *suggests*, human decides).
 
 ## Completion status
@@ -234,7 +234,7 @@ auto-approver (a natural follow-up: classifier *suggests*, human decides).
 T1–T6 all implemented with offline tests, plus post-T6 hardening (`@`-file completion:
 `e27aeef`, `4cce27e`, `b7d7bc0`; ShellRunner pipe-drain/EINTR: `13f63bc`, `f004251`),
 T6.5 (JSONL session log, `e666889`), T7 (Anthropic-native client, `371322a`), and T7a
-(OpenRouter provider profile, `ec13406`). Latest macOS verification (at `371322a`):
+(OpenRouter provider profile, `ec13406`), and T8 (naluri, `73dc73c`). Latest macOS verification (at `371322a`):
 `swift test` passed (80 tests), `swift run harness --selftest` passed, `swift build -c
 release` passed, `git diff --check` clean. History through `ec13406` is pushed to
 `origin/main`. Linux CI has not yet been confirmed against recent commits.
@@ -332,3 +332,28 @@ appended to `autodetectOrder` after `openai` so a present env key autodetects.
 Covered by a ProviderTests case (not in autodetect without a key; env-key autodetect;
 explicit `--provider openrouter` yields no credential). README provider table and
 autodetect order updated.
+
+## T8 — naluri: vendor-neutral typed instinct (implemented, `73dc73c`)
+
+The `judge` tool was tied to one vendor (TypeSafe's Jev). It is now **naluri**
+(Indonesian for instinct — Kahneman's System One): fast, typed gut-calls with
+probabilities, as the counterpart to the deliberate chat loop.
+
+- **Split:** `Naluri.swift` holds the vendor-neutral parts (`NaluriQuestion`,
+  `NaluriBackend`, `NaluriFormat.render`, `Config.naluriBackend` selection);
+  `TypeSafe.swift` is only the Jev HTTP client + `TypeSafeBackend`;
+  `NaluriTool.swift` is the `naluri` tool (renamed from `judge` — update any
+  allowlists referring to the old name); `Gate.swift` goes through the backend.
+- **ChatNaluri** (`ChatNaluri.swift`): cheap chat models (deepseek, zai) as a
+  backend. One request per question, answer constrained to one token (yes/no,
+  option letter, level digit), probabilities from `top_logprobs` normalised over
+  the allowed tokens. No logprobs → one-hot, flagged `uncalibrated`. Choice
+  questions are limited to 2–26 options, score to 2–10 levels on this backend.
+- **Config:** `HARNESS_NALURI` / `--naluri` / `"naluri"`, and
+  `HARNESS_NALURI_MODEL` / `--naluri-model` / `"naluriModel"`. Vendor key names
+  (`TYPESAFE_API_KEY`, `typesafeApiKey`) are unchanged.
+- **Tests:** ChatNaluriTests (distribution, prompts, answer shape, backend
+  selection); pure, no network.
+- **Unverified:** the live DeepSeek/GLM calls — whether each returns
+  `top_logprobs` and accepts `thinking: {type: disabled}` — and the `glm-4.5-flash`
+  model id. A live e2e leg for the chat backend is not yet written.

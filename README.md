@@ -122,7 +122,7 @@ Environment overrides: `HARNESS_BASE_URL`, `HARNESS_API_KEY`, `HARNESS_MODEL`,
 A JSON config file (`--config PATH`, `HARNESS_CONFIG`, or by default
 `.simple.h.conf` in the working directory) can hold the same values — `provider`, `baseURL`,
 `apiKey`, `model`, `maxTurns`, `streaming`, `reasoningEffort`, `gate`,
-`gateThreshold`, `typesafeApiKey`, `approval`, … as a top-level JSON object. Precedence:
+`gateThreshold`, `typesafeApiKey`, `naluri`, `naluriModel`, `approval`, … as a top-level JSON object. Precedence:
 flags > environment > config file > defaults.
 If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
@@ -197,12 +197,23 @@ be reached from tests only via `@testable import`.
   Disable with `HARNESS_STREAMING=0`.
 - **Naluri (typed instinct).** *Naluri* is Indonesian for instinct — the
   System One of Kahneman's pair, as opposed to the chat loop's deliberate System
-  Two. The `naluri` tool calls a backend (today TypeSafe's Jev) that answers
-  with calibrated probabilities, not prose:
-  yes/no (noul), pick-one (choice: distribution + confidence), rubric score.
-  Enable with `TYPESAFE_API_KEY`. The agent reaches for it when a decision
-  wants a number ("is this urgent? 0.96") instead of generated text; Jev
-  answers, the agent loop still owns the workflow.
+  Two. The `naluri` tool answers typed questions about a text with
+  probabilities, not prose: yes/no (noul), pick-one (choice: distribution +
+  confidence), rubric score. The agent reaches for it when a decision wants a
+  number ("is this urgent? 0.96") instead of generated text; naluri answers,
+  the agent loop still owns the workflow. The pre-model `--gate` uses it too.
+  Two interchangeable backends (`NaluriBackend`), same answer shape:
+  - **TypeSafe (Jev)** — the default when `TYPESAFE_API_KEY` is set; calibrated
+    probabilities from a purpose-built model.
+  - **Chat model** (`ChatNaluri`) — a cheap flash-tier model via
+    `HARNESS_NALURI=deepseek|zai` (or `--naluri`, or `"naluri"` in the config
+    file) and that provider's key. Each question is one tiny request limited to
+    a single answer token; the probability comes from the server's `logprobs`
+    normalised over the allowed tokens. Default models: `deepseek-flash`,
+    `glm-4.5-flash` (override: `HARNESS_NALURI_MODEL` / `--naluri-model`). If a
+    provider returns no logprobs the answer is a one-hot pick, marked
+    `[uncalibrated]`. The gate threshold means different things per model —
+    re-tune `--gate-threshold` when switching backend.
 - **Sub-agents (orchestration).** A `spawn_agent` tool: the model delegates a
   self-contained subtask to a fresh agent (same provider and tools, empty
   conversation, same cwd) and gets back only the final report — bulk work
