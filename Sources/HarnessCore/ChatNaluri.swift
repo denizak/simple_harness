@@ -195,7 +195,10 @@ struct ChatNaluri: NaluriBackend {
         for attempt in 0..<3 {
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if (status == 429 || status == 529), attempt < 2 {
+            // 429 can mean "out of balance" (z.ai code 1113), which no amount
+            // of backing off fixes — only retry real rate limiting.
+            let outOfBalance = String(data: data, encoding: .utf8)?.lowercased().contains("balance") == true
+            if (status == 429 || status == 529), attempt < 2, !outOfBalance {
                 try await Task.sleep(nanoseconds: UInt64(1_000_000_000) * UInt64(attempt + 1))
                 continue
             }
