@@ -214,7 +214,8 @@ be reached from tests only via `@testable import`.
     data (`naluriModel`, `naluriMaxTokens` on the provider profile); override
     the model with `HARNESS_NALURI_MODEL` / `--naluri-model`.
 
-  What the first live eval showed (40 easy cases — see `docs/next-tasks.md`):
+  What the live eval showed (70 cases, 30 of them deliberately ambiguous — see
+  `docs/next-tasks.md`; all three score ~96%, the difference is calibration):
 
   | Backend | Probabilities | Latency | Use it for |
   |---|---|---|---|
@@ -222,8 +223,9 @@ be reached from tests only via `@testable import`.
   | `deepseek-flash` | real logprobs, but saturated at ≥ 0.99 | ~820 ms | cheap picks |
   | `glm-5.3-flash` | none — z.ai has no logprobs; answers are one-hot, marked `[uncalibrated]` | ~2 s (thinking cannot be disabled) | cheap picks |
 
-  So a `--gate-threshold` only means something on Jev; on the chat backends
-  the gate is effectively yes/no.
+  Jev's confidence drops on ambiguous cases (0.97 → 0.80) and its errors sit near
+  0.5; DeepSeek and GLM stay at 1.00 even when wrong. So a `--gate-threshold` only
+  means something on Jev; on the chat backends the gate is effectively yes/no.
 - **Naluri eval.** `harness --eval-naluri [typesafe,deepseek,zai-coding]` runs the
   labelled cases in `Evals/naluri.json` (urgency, gate safety, routing,
   severity — 40 easy plus 30 deliberately ambiguous `hard` ones) against each backend and prints accuracy, Brier score,

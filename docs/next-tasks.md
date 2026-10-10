@@ -402,3 +402,28 @@ between two levels), marked `"difficulty": "hard"`. Ambiguous choice/score cases
 hard accuracy and mean confidence — a backend whose confidence does not drop on hard
 cases is giving picks, not probabilities. No hard cases were drafted for the gate-safety
 group: borderline requests there should come from real prompts, not invented ones.
+
+**Eval findings (70 cases, 40 easy + 30 hard; run `2026-10-10`):** all three backends
+96% overall and 90% on the hard cases (3 misses each of 30 — not enough to rank accuracy).
+Calibration is what differs:
+
+| Backend | Hard-case confidence | Confidence when wrong |
+|---|---|---|
+| Jev | 0.80 (0.97 on easy) | 0.53 |
+| deepseek-flash | 1.00 | 1.00 |
+| glm-5.3-flash | 1.00 (uncalibrated one-hot) | 1.00 |
+
+Jev's confidence falls on ambiguous cases and its mistakes sit near 0.5, so a threshold or
+"escalate to a human" rule can act on it; DeepSeek and GLM are confidently wrong, giving
+nothing to threshold. Conclusions: keep the gate on Jev; use the chat backends only where an
+occasional confident error is acceptable (routing, severity picks); GLM costs more than
+DeepSeek in latency (~1.3 s vs ~0.75 s) and spend for no gain here. Estimated spend for the
+full 70 × 3 run: ~$0.04 (assumed prices, not billed).
+
+**Reading the numbers:** Brier is only computed for yes/no and choice questions, so it is
+not comparable across backends — GLM's low 0.038 reflects having no misses on those types,
+not better probabilities. Most misses are cases where the label is arguable (e.g. dates in US
+format for European users: cosmetic vs major; "not urgent, but staging password posted in a
+public channel"), so a miss says little about the model. The gate group (10 cases) is all
+easy and all backends scored 100%, so **the gate threshold (0.45) remains untuned** — it needs
+borderline prompts from real use.
