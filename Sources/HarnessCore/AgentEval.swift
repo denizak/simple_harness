@@ -236,6 +236,12 @@ public enum AgentEval {
         var spent = 0.0
         var index = 0
         var abortedReason: String?
+        // Canary in the SHARED scratch root: if it disappears, a run deleted
+        // more than its own directory (runs share this parent), which can take
+        // concurrent siblings down with it. Detect it instead of guessing.
+        let canary = scratch + "/.canary"
+        try? FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: canary, contents: Data("canary".utf8))
         while index < jobs.count, spent < budgetUSD {
             let chunk = Array(jobs[index..<min(index + max(1, parallel), jobs.count)])
             index += chunk.count
@@ -254,6 +260,17 @@ public enum AgentEval {
                 spent += result.costUSD
                 progress("  \(result.passed ? "✓" : "✗") \(result.caseID) #\(result.run)  "
                     + "\(result.turns) turns, \(result.inputTokens + result.outputTokens) tok, \(result.wallMs / 1000)s")
+            }
+            if !FileManager.default.fileExists(atPath: canary) {
+                let marked = finished.map { run -> AgentEvalRun in
+                    var copy = run
+                    copy.workDirWiped = true
+                    return copy
+                }
+                results += marked
+                abortedReason = "a run deleted the shared scratch directory (\(scratch)) — concurrent runs in "
+                    + "this batch were affected: \(finished.map { "\($0.caseID)#\($0.run)" }.joined(separator: ", "))"
+                break
             }
             results += finished
             // A whole batch that never made a single model turn and exited

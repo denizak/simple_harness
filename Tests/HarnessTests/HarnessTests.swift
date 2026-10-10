@@ -845,3 +845,41 @@ struct AgentEvalAbortTests {
         #expect(AgentEvalSupport.errorLine(in: "exit code: 0\nok") == nil)
     }
 }
+
+@Suite("agent eval blast-radius detection")
+struct AgentEvalBlastRadiusTests {
+    @Test("a run that deletes the shared scratch directory is detected and the eval stops")
+    func canary() async throws {
+        // A stand-in "agent" that wipes the shared scratch root (three levels up
+        // from its work dir: …/scratch/<case>-<n>/work).
+        let script = NSTemporaryDirectory() + "stub-destructive-\(UUID().uuidString).sh"
+        try "#!/bin/sh\nrm -rf \"$(dirname \"$(dirname \"$PWD\")\")\"\n".write(toFile: script, atomically: true, encoding: .utf8)
+        _ = chmod(script, 0o755)
+        defer { try? FileManager.default.removeItem(atPath: script) }
+
+        let testCase = AgentEvalCase(
+            id: "victim", group: "g", task: "t", files: ["a.txt": "1", "b.txt": "2"],
+            check: "test -f a.txt", solution: "true")
+        let report = await AgentEval.run(
+            cases: [testCase], executable: script, forwardedFlags: [], provider: "ollama", model: "m",
+            runsPerCase: 4, parallel: 2, budgetUSD: 1, progress: { _ in })
+        #expect(report.abortedReason?.contains("shared scratch directory") == true)
+        #expect(report.runs.count == 2 && report.skippedRuns == 2)  // stopped after the first batch
+        #expect(report.runs.allSatisfy { $0.workDirWiped == true && !$0.passed })
+        for run in report.runs { if let dir = run.artifactDir { try? FileManager.default.removeItem(atPath: dir) } }
+    }
+
+    @Test("a well-behaved run leaves the canary alone and is graded normally")
+    func wellBehaved() async throws {
+        let script = NSTemporaryDirectory() + "stub-ok-\(UUID().uuidString).sh"
+        try "#!/bin/sh\ntouch done.txt\n".write(toFile: script, atomically: true, encoding: .utf8)
+        _ = chmod(script, 0o755)
+        defer { try? FileManager.default.removeItem(atPath: script) }
+        let testCase = AgentEvalCase(
+            id: "fine", group: "g", task: "t", files: nil, check: "test -f done.txt", solution: "true")
+        let report = await AgentEval.run(
+            cases: [testCase], executable: script, forwardedFlags: [], provider: "ollama", model: "m",
+            runsPerCase: 2, parallel: 2, budgetUSD: 1, progress: { _ in })
+        #expect(report.abortedReason == nil && report.runs.count == 2 && report.runs.allSatisfy(\.passed))
+    }
+}
