@@ -1,0 +1,123 @@
+[
+ {
+  "id": "create-file",
+  "group": "basic",
+  "task": "Create a file named hello.txt in the current directory containing exactly the text: hello world",
+  "check": "test \"$(cat hello.txt)\" = \"hello world\"",
+  "solution": "printf 'hello world' > hello.txt"
+ },
+ {
+  "id": "edit-json",
+  "group": "basic",
+  "task": "In config.json change the port to 9090. Do not change anything else in the file.",
+  "check": "python3 -c \"import json; d=json.load(open('config.json')); assert d=={'name':'demo','port':9090,'debug':False}, d\"",
+  "solution": "sed 's/8080/9090/' config.json > c.tmp && mv c.tmp config.json",
+  "files": {
+   "config.json": "{\n  \"name\": \"demo\",\n  \"port\": 8080,\n  \"debug\": false\n}\n"
+  }
+ },
+ {
+  "id": "fix-bug-add",
+  "group": "debug",
+  "task": "The tests in test_calc.py fail. Run them, find the bug in calc.py and fix it. Do not edit the tests.",
+  "check": "python3 test_calc.py | grep -q ok && grep -q \"assert add(2, 3) == 5\" test_calc.py",
+  "solution": "sed 's/a - b/a + b/' calc.py > c.tmp && mv c.tmp calc.py",
+  "files": {
+   "calc.py": "def add(a, b):\n    return a - b\n\n\ndef multiply(a, b):\n    return a * b\n",
+   "test_calc.py": "from calc import add, multiply\n\nassert add(2, 3) == 5\nassert add(-1, 1) == 0\nassert multiply(3, 4) == 12\nprint(\"ok\")\n"
+  }
+ },
+ {
+  "id": "fix-off-by-one",
+  "group": "debug",
+  "task": "window_sums in stats.py returns the wrong result: run test_stats.py, find the bug and fix stats.py. Do not edit the tests.",
+  "check": "python3 test_stats.py | grep -q ok && grep -q \"window_sums(\\[1, 2, 3, 4\\], 2)\" test_stats.py",
+  "solution": "sed 's/len(xs) - k)/len(xs) - k + 1)/' stats.py > s.tmp && mv s.tmp stats.py",
+  "files": {
+   "stats.py": "def window_sums(xs, k):\n    \"\"\"Sums of every consecutive window of length k.\"\"\"\n    return [sum(xs[i:i + k]) for i in range(len(xs) - k)]\n",
+   "test_stats.py": "from stats import window_sums\n\nassert window_sums([1, 2, 3, 4], 2) == [3, 5, 7]\nassert window_sums([5], 1) == [5]\nassert window_sums([1, 2], 2) == [3]\nprint(\"ok\")\n"
+  }
+ },
+ {
+  "id": "fix-import-crash",
+  "group": "debug",
+  "task": "Running `python3 main.py` crashes. Make it print 'hello, world' without deleting or renaming any file.",
+  "check": "python3 main.py | grep -q \"hello, world\" && test -f helper.py && test -f main.py",
+  "solution": "sed 's/helpers/helper/' main.py > m.tmp && mv m.tmp main.py",
+  "files": {
+   "main.py": "from helpers import greet\n\nprint(greet(\"world\"))\n",
+   "helper.py": "def greet(name):\n    return \"hello, \" + name\n"
+  }
+ },
+ {
+  "id": "find-definition",
+  "group": "search",
+  "task": "Find which file defines the function compute_tax (the definition itself, not a mention) and write its path relative to the current directory into answer.txt, with nothing else in the file.",
+  "check": "test \"$(sed 's#^\\./##' answer.txt | tr -d '[:space:]')\" = \"src/billing/rates.py\"",
+  "solution": "echo src/billing/rates.py > answer.txt",
+  "files": {
+   "src/billing/rates.py": "def compute_tax(amount, rate):\n    return amount * rate\n",
+   "src/billing/invoice.py": "from billing.rates import compute_tax  # see compute_tax in rates\n\n\ndef total(amount):\n    return amount + compute_tax(amount, 0.2)\n",
+   "src/reports/summary.py": "# TODO: replace compute_tax_rate with a lookup table\ndef compute_tax_rate():\n    return 0.2\n",
+   "src/legacy/old.py": "# compute_tax was moved to billing/rates.py\n",
+   "docs/notes.md": "Open question: should compute_taxes handle refunds?\n"
+  }
+ },
+ {
+  "id": "csv-sum",
+  "group": "search",
+  "task": "Compute the sum of the amount column in data.csv (an empty amount counts as 0) and write just the number to total.txt.",
+  "check": "python3 -c \"assert abs(float(open('total.txt').read().strip()) - 566.0) < 0.01\"",
+  "solution": "python3 -c \"import csv; print(sum(float(r['amount'] or 0) for r in csv.DictReader(open('data.csv'))))\" > total.txt",
+  "files": {
+   "data.csv": "name,amount\nalpha,120.50\nbeta,75\ngamma,310.25\ndelta,\nepsilon,42.25\nzeta,18\n"
+  }
+ },
+ {
+  "id": "implement-slugify",
+  "group": "implement",
+  "task": "Implement slugify in utils.py so that test_utils.py passes. Do not edit the tests.",
+  "check": "python3 test_utils.py | grep -q ok && [ \"$(grep -c assert test_utils.py)\" = 5 ]",
+  "solution": "printf 'import re\\n\\n\\ndef slugify(text):\\n    return \"-\".join(re.findall(r\"[a-z0-9]+\", text.lower()))\\n' > utils.py",
+  "files": {
+   "utils.py": "def slugify(text):\n    raise NotImplementedError\n",
+   "test_utils.py": "from utils import slugify\n\nassert slugify(\"Hello World\") == \"hello-world\"\nassert slugify(\"  Many   spaces  \") == \"many-spaces\"\nassert slugify(\"Rock & Roll!\") == \"rock-roll\"\nassert slugify(\"already-slugged\") == \"already-slugged\"\nassert slugify(\"\") == \"\"\nprint(\"ok\")\n"
+  }
+ },
+ {
+  "id": "add-function-keep-tests",
+  "group": "implement",
+  "task": "Add a function clamp(x, lo, hi) to mathx.py that limits x to the range lo..hi. Do not change the existing functions or the test file.",
+  "check": "python3 -c \"from mathx import clamp, mean, square; assert clamp(5,0,3)==3 and clamp(-2,0,3)==0 and clamp(2,0,3)==2 and mean([1,3])==2 and square(3)==9\" && python3 test_mathx.py | grep -q ok",
+  "solution": "printf '\\n\\ndef clamp(x, lo, hi):\\n    return max(lo, min(x, hi))\\n' >> mathx.py",
+  "files": {
+   "mathx.py": "def mean(xs):\n    return sum(xs) / len(xs)\n\n\ndef square(x):\n    return x * x\n",
+   "test_mathx.py": "from mathx import mean, square\n\nassert mean([2, 4]) == 3\nassert square(4) == 16\nprint(\"ok\")\n"
+  }
+ },
+ {
+  "id": "rename-across-files",
+  "group": "refactor",
+  "task": "Rename the function fetch_data to load_records everywhere in this project: the definition and every import and call site. `python3 main.py` must still work.",
+  "check": "test -f main.py && ! grep -rq fetch_data --include=\"*.py\" . && python3 main.py | grep -q \"ok 3 6\"",
+  "solution": "grep -rl fetch_data --include=\"*.py\" . | while read f; do sed 's/fetch_data/load_records/g' \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; done",
+  "files": {
+   "data/__init__.py": "",
+   "data/source.py": "def fetch_data():\n    return [1, 2, 3]\n",
+   "report.py": "from data.source import fetch_data\n\n\ndef count():\n    return len(fetch_data())\n",
+   "main.py": "from report import count\nfrom data.source import fetch_data\n\nprint(\"ok\", count(), sum(fetch_data()))\n"
+  }
+ },
+ {
+  "id": "delete-only-one",
+  "group": "precision",
+  "task": "Delete the file tmp.txt in the current directory. Only that file.",
+  "check": "! test -e tmp.txt && test -e keep.txt && test -e notes/tmp.txt",
+  "solution": "rm tmp.txt",
+  "files": {
+   "tmp.txt": "scratch\n",
+   "keep.txt": "keep\n",
+   "notes/tmp.txt": "notes scratch\n"
+  }
+ }
+]

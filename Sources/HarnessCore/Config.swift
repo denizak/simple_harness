@@ -29,6 +29,9 @@ public struct Config: Sendable {
     /// The agent appends one line per message as the run progresses, so a
     /// crash can lose at most the in-flight turn, never the whole transcript.
     public var sessionLog: String?
+    /// Per-turn token usage as JSONL (UsageLog.swift); nil = off. Opt-in via
+    /// HARNESS_USAGE_LOG; shared with sub-agents through subConfig.
+    public var usageLog: String?
     public var maxTokens: Int = 4096
     /// Hard cap on model turns per user task (loop safety belt).
     public var maxTurns: Int = 25
@@ -220,6 +223,7 @@ public struct Config: Sendable {
            ["0", "false", "no", "off"].contains(value.lowercased()) {
             config.streaming = false
         }
+        if let value = env["HARNESS_USAGE_LOG"], !value.isEmpty { config.usageLog = value }
         if let value = env["HARNESS_REASONING"], !value.isEmpty {
             config.reasoningEffort = value
         }

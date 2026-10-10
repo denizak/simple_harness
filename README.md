@@ -236,6 +236,27 @@ be reached from tests only via `@testable import`.
   stops issuing calls once the *estimated* cost — token usage × assumed prices
   in `NaluriEvalPricing`, not billing data — reaches the cap. `--eval-limit N`
   gives a cheap smoke run. Backends without credentials are skipped.
+- **Agent eval.** `harness --eval-agent` measures whether the whole agent
+  finishes real tasks. Each case in `Evals/agent.json` seeds a fresh temp
+  directory, runs `harness --once "<task>"` in it as a real subprocess (the
+  actual binary, tools and config), then runs a shell `check` there — exit 0 =
+  pass, so grading looks at the files, not the model's prose. 11 cases:
+  create/edit a file, fix two bugs and a crash, find a definition among decoys,
+  sum a CSV, implement a function against tests, add a function without
+  breaking others, rename across files, delete exactly one file. Use
+  `--eval-runs 3` (runs are noisy), `--eval-parallel N`, `--eval-only id,id`,
+  `--eval-budget USD` (default 1.00, hard stop on *estimated* spend from the
+  per-turn usage log × assumed prices). Your `./.simple.h.conf` is forwarded so
+  the agent runs as you run it (`--eval-no-config` to skip; `--no-gate` and
+  `--approval never` are always forced). Failed runs keep their work dir and
+  transcript. Output goes to `Evals/results/`.
+  **It is live and the agent runs real shell commands with approvals off — the
+  temp dir is where it starts, not a sandbox.** Only run cases you've reviewed.
+  `harness --eval-validate` is the offline check (no model, no spend): it proves
+  every case's check *fails* on the untouched files and *passes* after the
+  case's reference solution, and runs under `swift test`. `HARNESS_USAGE_LOG=path`
+  (or `usageLog` in the config) makes any run append one JSON line per model
+  turn — sub-agents included — which is what the eval reads.
 - **Sub-agents (orchestration).** A `spawn_agent` tool: the model delegates a
   self-contained subtask to a fresh agent (same provider and tools, empty
   conversation, same cwd) and gets back only the final report — bulk work

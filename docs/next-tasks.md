@@ -2,7 +2,7 @@
 
 Originally planned against baseline `c96ad42`. T1–T5 were implemented in order in that worktree; T6 was planned against `4d7ba3a` and is now implemented (`a566d93`). This document is a historical record — current status lives in "Completion status" below.
 
-**Status: T1–T9 all implemented on `main`.** The roadmap items from README
+**Status: T1–T10 all implemented on `main`.** The roadmap items from README
 "Where to go next" are complete; the one remaining named follow-up is the per-tool
 approval allowlist (T6's deferred refinement).
 
@@ -235,7 +235,7 @@ T1–T6 all implemented with offline tests, plus post-T6 hardening (`@`-file com
 `e27aeef`, `4cce27e`, `b7d7bc0`; ShellRunner pipe-drain/EINTR: `13f63bc`, `f004251`),
 T6.5 (JSONL session log, `e666889`), T7 (Anthropic-native client, `371322a`), and T7a
 (OpenRouter provider profile, `ec13406`), T8 (naluri, `73dc73c`) and T9 (naluri eval, `4bcdadf`). Latest macOS verification:
-`swift test` passed (90 tests), `swift run harness --selftest` passed, `swift build -c
+`swift test` passed (96 tests), `swift run harness --selftest` passed, `swift build -c
 release` passed, `git diff --check` clean. History through `ec13406` is pushed to
 `origin/main`. Linux CI has not yet been confirmed against recent commits.
 
@@ -382,9 +382,7 @@ a difference under ~15 points between backends is noise; replace or extend them
 with real prompts (especially the gate-safety group). The gate threshold needs
 tuning per backend from these results.
 
-**Next (not built):** the agent eval — a subprocess runner (`harness --once` per
-case in a temp dir, check by command) needs one core change: persist token usage
-(the loop currently only prints it, and sub-agent usage is dropped).
+**Next:** the agent eval — built as T10.
 
 **Eval findings (first live runs, 40 cases):** Jev and deepseek-flash 40/40, glm-5.3-flash
 38/39 graded. The set is too easy to rank accuracy; calibration is what separates the
@@ -427,3 +425,37 @@ format for European users: cosmetic vs major; "not urgent, but staging password 
 public channel"), so a miss says little about the model. The gate group (10 cases) is all
 easy and all backends scored 100%, so **the gate threshold (0.45) remains untuned** — it needs
 borderline prompts from real use.
+
+## T10 — agent eval (implemented; not yet run live)
+
+Grades outcomes, not prose: `AgentEval.swift` (library: case model, seeding, validation,
+runner, summary, table) + `AgentEvalCommand.swift` (`--eval-agent`, `--eval-validate`) +
+`Evals/agent.json` (11 cases). Each run seeds a temp dir, spawns `harness --once` there
+(subprocess, so the real binary and tools are exercised and the process-global cwd is a
+non-issue), then runs the case's shell `check` (exit 0 = pass).
+
+- **Core change:** `UsageLog.swift` + `Config.usageLog` / `HARNESS_USAGE_LOG` — one JSON
+  line per model turn (`depth`, `prompt`, `completion`, `finish`), written from
+  `Agent.continueRun` and shared with sub-agents via the config. Previously usage was only
+  printed. Opt-in; a write failure is silent.
+- **Soundness without a model:** every case carries a reference `solution`. `validate`
+  (CLI `--eval-validate`, and a `swift test`) proves the check fails on the seed and passes
+  after the solution, so a pass can't be vacuous and a fail isn't a broken check.
+- **Metrics per case over N runs:** passes/runs, mean turns, tool calls, tokens, seconds;
+  per-group pass rate; timeouts vs harness-error/turn-cap endings; estimated cost against
+  `--eval-budget` (assumed prices in `AgentEvalPricing`, no run starts past the cap).
+  Failed runs keep work dir + transcript + stdout.
+- **Safety:** approvals are off (`--approval never`) and `bash` is real. The temp dir is a
+  start point, not a sandbox; the CLI prints a warning. Run only reviewed cases, ideally in
+  a container.
+- **Tests (offline):** all shipped cases validate; validation catches a vacuous and an
+  unsatisfiable check; shell-report parsing/quoting; usage-log append/totals; summary and
+  pricing. The runner's plumbing was smoke-tested against a dead local endpoint (spawn,
+  artifacts kept, report written, zero spend). **The live path has not been run.**
+
+**Caveats:** 11 cases × a few runs is small — pass-rate differences under ~20 points are
+noise. Cases are synthetic and use python3 + POSIX tools, so they need both on `PATH`.
+`--approval never` means the eval says nothing about approval-gate behaviour (covered by
+the stub-model tests). A forwarded config's `apiKey` still overrides provider env keys (the
+existing precedence), so pass `--eval-no-config` plus `--provider X` and export the key if
+results look like auth errors.

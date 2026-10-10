@@ -169,6 +169,7 @@ public struct Agent {
             messages.append(assistantMessage)
             log?.append(message: assistantMessage)
 
+            UsageLog.append(path: config.usageLog, depth: depth, usage: turn.usage, finish: turn.finishReason)
             if let usage = turn.usage {
                 let tokens = usage.promptTokens + usage.completionTokens
                 let summary = "   [turn \(turnIndex): \(tokens) tokens, finish=\(turn.finishReason)]"

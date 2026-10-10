@@ -755,3 +755,63 @@ struct NaluriHeadroomTests {
         #expect(Config.catalog["deepseek"]?.naluriMaxTokens == nil)
     }
 }
+
+@Suite("agent eval support")
+struct AgentEvalTests {
+    @Test("every shipped case is sound: check fails on the seed, passes after the reference solution")
+    func shippedCasesValidate() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let cases = try AgentEvalCase.load(path: root.appendingPathComponent("Evals/agent.json").path)
+        #expect(cases.count >= 10)
+        let problems = await AgentEval.validate(cases: cases)
+        #expect(problems.isEmpty, "\(problems)")
+    }
+
+    @Test("validation catches a vacuous check and an unsatisfiable one")
+    func validationCatchesBadCases() async {
+        let vacuous = AgentEvalCase(id: "v", group: "g", task: "t", files: nil, check: "true", solution: "true")
+        let impossible = AgentEvalCase(id: "i", group: "g", task: "t", files: nil, check: "false", solution: "true")
+        let problems = await AgentEval.validate(cases: [vacuous, impossible])
+        #expect(problems.contains { $0.hasPrefix("v:") && $0.contains("vacuous") })
+        #expect(problems.contains { $0.hasPrefix("i:") && $0.contains("still FAILS") })
+    }
+
+    @Test("shell report parsing and quoting")
+    func parsing() {
+        #expect(AgentEvalSupport.exitCode(of: "exit code: 0\nhello") == 0)
+        #expect(AgentEvalSupport.exitCode(of: "exit code: 1 (timed out)\n") == 1)
+        #expect(AgentEvalSupport.timedOut("exit code: 1 (timed out)\n"))
+        #expect(!AgentEvalSupport.timedOut("exit code: 0\nmentions (timed out) in output"))
+        #expect(AgentEvalSupport.exitCode(of: "garbage") == -1)
+        #expect(AgentEvalSupport.shellQuote("it's") == "'it'\\''s'")
+    }
+
+    @Test("usage log: lines append, totals sum across depths, a missing file is zeros")
+    func usageLog() throws {
+        let path = NSTemporaryDirectory() + "usage-\(UUID().uuidString).jsonl"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        UsageLog.append(path: path, depth: 0, usage: Usage(promptTokens: 100, completionTokens: 10), finish: "tool_calls")
+        UsageLog.append(path: path, depth: 1, usage: Usage(promptTokens: 50, completionTokens: 5), finish: "stop")
+        UsageLog.append(path: path, depth: 0, usage: nil, finish: "stop")
+        UsageLog.append(path: nil, depth: 0, usage: nil, finish: "stop")  // off = no-op
+        let totals = UsageLog.totals(path: path)
+        #expect(totals.turns == 3 && totals.prompt == 150 && totals.completion == 15)
+        #expect(UsageLog.totals(path: path + ".missing").turns == 0)
+    }
+
+    @Test("summary groups runs per case; pricing is conservative and zero for local")
+    func summary() {
+        func run(_ id: String, _ n: Int, passed: Bool, turns: Int) -> AgentEvalRun {
+            AgentEvalRun(caseID: id, group: "g", run: n, passed: passed, harnessExit: 0, timedOut: false,
+                         turns: turns, toolCalls: turns - 1, inputTokens: 100, outputTokens: 20, wallMs: 2000,
+                         costUSD: 0, artifactDir: nil, checkOutput: nil)
+        }
+        let rows = AgentEval.summarize([run("a", 1, passed: true, turns: 2), run("a", 2, passed: false, turns: 4),
+                                        run("b", 1, passed: true, turns: 3)])
+        #expect(rows.count == 2 && rows[0].caseID == "a" && rows[0].passes == 1 && rows[0].runs == 2)
+        #expect(rows[0].meanTurns == 3 && rows[0].meanTokens == 120 && rows[0].meanSeconds == 2)
+        #expect(AgentEvalPricing.cost(provider: "ollama", input: 1_000_000, output: 1_000_000) == 0)
+        #expect(AgentEvalPricing.cost(provider: "unknown", input: 1_000_000, output: 0) == 3)
+    }
+}

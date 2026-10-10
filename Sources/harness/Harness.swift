@@ -68,6 +68,10 @@ struct HarnessMain {
             await E2ETest.run()
             return
         }
+        if arguments.contains("--eval-agent") || arguments.contains("--eval-validate") {
+            await AgentEvalCommand.run(arguments: arguments)
+            return
+        }
         if arguments.contains("--eval-naluri") {
             await EvalCommand.run(arguments: arguments)
             return
@@ -106,6 +110,9 @@ struct HarnessMain {
                   --eval-naluri [BACKENDS]  LIVE: compare naluri backends on Evals/naluri.json
                                     (typesafe,deepseek,zai; --eval-budget USD default 1,
                                     --eval-limit N, --eval-cases PATH)
+                  --eval-agent      LIVE: run the agent on tasks in Evals/agent.json, grade the outcome
+                                    (--eval-runs N, --eval-parallel N, --eval-budget USD, --eval-only ids)
+                  --eval-validate   offline: check every agent-eval case is sound (no model)
                   --selftest        exercise the tool layer without any API call
                   --e2e             stub-model loop tests + a live round-trip
                   --version         print the version and exit
