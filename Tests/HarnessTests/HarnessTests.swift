@@ -238,13 +238,13 @@ struct ProviderTests {
     }
 }
 
-@Suite("TypeSafe judge wire contract")
+@Suite("naluri wire contract")
 struct TypeSafeTests {
-    private var questions: [TypeSafeQuestion] {
+    private var questions: [NaluriQuestion] {
         [
-            TypeSafeQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
+            NaluriQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
                              criteria: .object(["true": .string("Time-sensitive"), "false": .string("No urgency")])),
-            TypeSafeQuestion(id: "team", type: "choice", instructions: "Which team?",
+            NaluriQuestion(id: "team", type: "choice", instructions: "Which team?",
                              criteria: .object(["billing": .string("Payments"), "tech": .string("Bugs")])),
         ]
     }
@@ -265,7 +265,7 @@ struct TypeSafeTests {
         let response = JSONValue.parse(
             #"{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95},"# +
             #""team":{"type":"choice","choice":"billing","probabilities":{"billing":0.88,"tech":0.12},"confidence":0.81}}}"#) ?? .null
-        let rendered = TypeSafeClient.format(response)
+        let rendered = NaluriFormat.render(response)
         #expect(rendered.contains("95%"))
         #expect(rendered.contains("billing"))
         #expect(rendered.contains("0.81"))
@@ -584,5 +584,66 @@ struct StubLoopTests {
         #expect((try? String(contentsOfFile: filePath, encoding: .utf8)) == "spawned!")
         #expect(messages.contains { $0.role == "tool" && $0.content?.contains("SUB-AGENT REPORT") ?? false })
         #expect(messages.last?.role == "assistant" && messages.last?.toolCalls == nil)
+    }
+}
+@Suite("naluri chat backend (logprobs)")
+struct ChatNaluriTests {
+    private let noul = NaluriQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?")
+    private let choice = NaluriQuestion(
+        id: "team", type: "choice", instructions: "Which team?",
+        criteria: .object(["billing": .string("Payments"), "tech": .string("Bugs")]))
+    private let score = NaluriQuestion(
+        id: "sev", type: "score", instructions: "How severe?",
+        criteria: .array([.string("Low"), .string("Mid"), .string("High")]))
+
+    @Test("distribution normalises over candidates, merging case and whitespace variants")
+    func distribution() throws {
+        let top: [(token: String, logprob: Double)] = [
+            ("Yes", log(0.6)), (" yes", log(0.2)), ("no", log(0.1)), ("maybe", log(0.1)),
+        ]
+        let result = try #require(ChatNaluri.distribution(top: top, candidates: ["yes", "no"]))
+        #expect(abs(result[0] - 0.8 / 0.9) < 1e-9)
+        #expect(abs(result[1] - 0.1 / 0.9) < 1e-9)
+        #expect(ChatNaluri.distribution(top: [("zzz", -1)], candidates: ["yes", "no"]) == nil)
+    }
+
+    @Test("prompts constrain the answer token and reject out-of-range questions")
+    func prompts() throws {
+        #expect(try ChatNaluri.prompt(for: noul, state: "x").candidates == ["yes", "no"])
+        let picked = try ChatNaluri.prompt(for: choice, state: "x")
+        #expect(picked.candidates == ["a", "b"])
+        #expect(picked.text.contains("A. billing"))
+        #expect(try ChatNaluri.prompt(for: score, state: "x").candidates == ["0", "1", "2"])
+        let tooFew = NaluriQuestion(id: "s", type: "score", instructions: "?", criteria: .array([.string("only")]))
+        #expect(throws: LLMError.self) { try ChatNaluri.prompt(for: tooFew, state: "x") }
+    }
+
+    @Test("answers use the shared shape and render through NaluriFormat")
+    func answers() {
+        let n = ChatNaluri.answer(for: noul, probabilities: [0.9, 0.1], calibrated: true)
+        #expect(n.objectValue?["noul"]?.doubleValue == 0.9)
+        let c = ChatNaluri.answer(for: choice, probabilities: [0.25, 0.75], calibrated: true)
+        #expect(c.objectValue?["choice"]?.stringValue == "tech")
+        let s = ChatNaluri.answer(for: score, probabilities: [0, 0.5, 0.5], calibrated: false)
+        #expect(s.objectValue?["score"]?.doubleValue == 1.5)
+        let rendered = NaluriFormat.render(.object(["answers": .object(["urgent": n, "team": c, "sev": s])]))
+        #expect(rendered.contains("90%") && rendered.contains("tech") && rendered.contains("uncalibrated"))
+    }
+
+    @Test("backend selection: typesafe default, chat providers by name, none without keys")
+    func selection() {
+        var config = Config(provider: "ollama", baseURL: "http://x", apiKey: "none", model: "m")
+        #expect(config.naluriBackend == nil)
+        config.typesafeApiKey = "k"
+        #expect(config.naluriBackend is TypeSafeBackend)
+        config.naluriBackendName = "deepseek"
+        config.provider = "deepseek"
+        config.apiKey = "dk"
+        let chat = config.naluriBackend as? ChatNaluri
+        #expect(chat?.model == "deepseek-flash")
+        config.naluriBackendName = "zai"
+        config.provider = "zai"
+        config.apiKey = "zk"
+        #expect((config.naluriBackend as? ChatNaluri)?.model == "glm-4.5-flash")
     }
 }

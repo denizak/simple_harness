@@ -49,10 +49,15 @@ public struct Config: Sendable {
     /// How deep spawn_agent may nest: 0 = top agent, so 2 allows
     /// top → sub → sub-sub. At the cap the tool disappears entirely.
     public var maxAgentDepth: Int = 2
-    /// TypeSafe API key (https://docs.typesafe.ai) — powers the `judge` tool.
+    /// TypeSafe API key (https://docs.typesafe.ai) — powers the `naluri` tool via the TypeSafe (Jev) backend.
     /// Read from the environment; optional — the tool reports its absence.
     public var typesafeApiKey: String?
-    /// Pre-model gate (Gate.swift): judge each user task with TypeSafe before
+    /// Which naluri backend answers: "typesafe" or a catalog provider id
+    /// (deepseek, zai, …) for ChatNaluri. nil = typesafe when its key is set.
+    public var naluriBackendName: String?
+    /// Chat-model override for ChatNaluri (default: the provider's flash tier).
+    public var naluriModel: String?
+    /// Pre-model gate (Gate.swift): judge each user task with naluri before
     /// the first model call; reject below `gateThreshold`. Fail-open.
     public var gateEnabled: Bool = false
     /// Minimum "proceed" probability for the gate to let a task through.
@@ -221,6 +226,8 @@ public struct Config: Sendable {
         // Optional integrations (nil when unset — but only when env is unset,
         // so a config-file value survives; later sources must not clobber it).
         if let value = env["TYPESAFE_API_KEY"] { config.typesafeApiKey = value }
+        if let value = env["HARNESS_NALURI"], !value.isEmpty { config.naluriBackendName = value.lowercased() }
+        if let value = env["HARNESS_NALURI_MODEL"], !value.isEmpty { config.naluriModel = value }
         if let value = env["HARNESS_GATE"],
            ["1", "true", "yes", "on"].contains(value.lowercased()) {
             config.gateEnabled = true
@@ -252,6 +259,8 @@ public struct Config: Sendable {
             config.apiKey = value("--api-key", config.apiKey) ?? config.apiKey
             config.reasoningEffort = value("--reasoning", config.reasoningEffort) ?? config.reasoningEffort
             config.typesafeApiKey = value("--typesafe-key", config.typesafeApiKey) ?? config.typesafeApiKey
+            config.naluriBackendName = value("--naluri", config.naluriBackendName)?.lowercased() ?? config.naluriBackendName
+            config.naluriModel = value("--naluri-model", config.naluriModel) ?? config.naluriModel
             if let raw = value("--max-turns", nil), let parsed = Int(raw), parsed > 0 {
                 config.maxTurns = parsed
             }
@@ -347,6 +356,8 @@ public struct Config: Sendable {
         if let value = entries["streaming"]?.boolValue { config.streaming = value }
         if let value = string("reasoningEffort") { config.reasoningEffort = value }
         if let value = string("typesafeApiKey") { config.typesafeApiKey = value }
+        if let value = string("naluri") { config.naluriBackendName = value.lowercased() }
+        if let value = string("naluriModel") { config.naluriModel = value }
         if let value = entries["gate"]?.boolValue { config.gateEnabled = value }
         if let value = entries["gateThreshold"]?.doubleValue, value > 0, value < 1 {
             config.gateThreshold = value

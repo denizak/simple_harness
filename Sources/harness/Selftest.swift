@@ -271,13 +271,13 @@ enum SelfTest {
             Self.check(name, condition, detail, failures: &failures)
         }
         let judged = [
-            TypeSafeQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
+            NaluriQuestion(id: "urgent", type: "noul", instructions: "Is this urgent?",
                              criteria: .object(["true": .string("Time-sensitive"),
                                                 "false": .string("No urgency")])),
-            TypeSafeQuestion(id: "team", type: "choice", instructions: "Which team?",
+            NaluriQuestion(id: "team", type: "choice", instructions: "Which team?",
                              criteria: .object(["billing": .string("Payments"),
                                                 "tech": .string("Bugs")])),
-            TypeSafeQuestion(id: "severity", type: "score", instructions: "How severe?",
+            NaluriQuestion(id: "severity", type: "score", instructions: "How severe?",
                              criteria: .array([.string("Low"), .string("High")])),
         ]
         let safeRequest = TypeSafeClient.request(state: "server down", questions: judged)
@@ -294,7 +294,7 @@ enum SelfTest {
         let sampleJSON = #"{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95},"# +
             #""team":{"type":"choice","choice":"billing","probabilities":{"billing":0.88,"tech":0.12},"confidence":0.81}}}"#
         let sampleResponse = JSONValue.parse(sampleJSON) ?? .null
-        let rendered = TypeSafeClient.format(sampleResponse)
+        let rendered = NaluriFormat.render(sampleResponse)
         check("TypeSafe format renders probabilities",
               rendered.contains("95%") && rendered.contains("billing") && rendered.contains("0.81"),
               rendered.replacingOccurrences(of: "\n", with: " | "))

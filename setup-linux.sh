@@ -184,5 +184,5 @@ cat <<EOF
     ./.build/release/harness --help
 
 Then create a ./.simple.h.conf next to where you run it (see README.md) and
-export TYPESAFE_API_KEY=… if you want the judge tool / pre-model gate.
+export TYPESAFE_API_KEY=… if you want the naluri tool / pre-model gate.
 EOF

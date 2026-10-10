@@ -4,15 +4,12 @@ import FoundationNetworking  // URLSession lives here on Linux
 #endif
 
 // ---------------------------------------------------------------------------
-// TypeSafe.swift — typed judgments as a tool primitive.
+// TypeSafe.swift — the TypeSafe / Jev backend for naluri.
 //
-// TypeSafe (https://docs.typesafe.ai) is NOT a chat API: its System One
-// models answer typed questions about a `state` and return calibrated
-// probabilities — not prose. So it does NOT implement ChatModel (the loop
-// needs text generation); instead it's a TOOL the agent can call when a
-// decision wants a number, e.g. "is this log urgent? 0.95" or "which team
-// should handle this? billing (88%)". Code owns the workflow; the model
-// supplies programmable common sense.
+// One NaluriBackend among possible others (see Naluri.swift). TypeSafe
+// (https://docs.typesafe.ai) is NOT a chat API: its System One model (Jev)
+// answers typed questions about a `state` and returns calibrated
+// probabilities — not prose.
 //
 // Wire contract (https://docs.typesafe.ai/api.md):
 //   POST https://api.typesafe.ai/v1/systemone      Authorization: Bearer <key>
@@ -20,30 +17,13 @@ import FoundationNetworking  // URLSession lives here on Linux
 //   → { "model": "...", "answers": { <id>: {"type": "noul", "noul": 0.95} | … }, "usage": {...} }
 // ---------------------------------------------------------------------------
 
-/// One typed question, normalized from tool arguments.
-public struct TypeSafeQuestion: Sendable {
-    public var id: String
-    /// "noul" (yes/no) | "choice" (pick one) | "score" (rate on levels)
-    public var type: String
-    public var instructions: String
-    /// noul → {"true": …, "false": …} · choice → {option: description} · score → [levels]
-    public var criteria: JSONValue?
-
-    public init(id: String, type: String, instructions: String, criteria: JSONValue? = nil) {
-        self.id = id
-        self.type = type
-        self.instructions = instructions
-        self.criteria = criteria
-    }
-}
-
 public enum TypeSafeClient {
     public static let endpoint = "https://api.typesafe.ai/v1/systemone"
     public static let model = "jev-latest"
 
     /// Pure helper — builds the request body from tool arguments. Unit-tested
     /// in --selftest (no network, no key needed).
-    public static func request(state: String, questions: [TypeSafeQuestion]) -> JSONValue {
+    public static func request(state: String, questions: [NaluriQuestion]) -> JSONValue {
         var questionMap: [String: JSONValue] = [:]
         for question in questions {
             var entry: [String: JSONValue] = [
@@ -63,7 +43,7 @@ public enum TypeSafeClient {
     /// POST the evaluation. Retries 429/529 with linear backoff (the docs
     /// recommend backing off rather than immediate retries).
     public static func evaluate(
-        state: String, questions: [TypeSafeQuestion], apiKey: String
+        state: String, questions: [NaluriQuestion], apiKey: String
     ) async throws -> JSONValue {
         let payload = try JSONEncoder().encode(request(state: state, questions: questions))
         var request = URLRequest(url: URL(string: endpoint)!)
@@ -91,63 +71,12 @@ public enum TypeSafeClient {
         }
         throw LLMError(status: 0, body: "TypeSafe retry loop exhausted")
     }
+}
 
-    /// Render the answer map into compact, model-readable lines.
-    /// Split into tiny per-answer functions: one big `format` made the Swift
-    /// type-checker blow its time budget (each optional-chain + interpolation
-    /// accumulates). Small functions type-check in microseconds.
-    public static func format(_ root: JSONValue) -> String {
-        guard let answers = root.objectValue?["answers"]?.objectValue else {
-            return "TypeSafe returned no answers"
-        }
-        var lines: [String] = []
-        for (id, answer) in answers.sorted(by: { $0.key < $1.key }) {
-            lines.append(formatAnswer(id: id, answer: answer))
-        }
-        if let usage = root.objectValue?["usage"]?.objectValue {
-            let input = usage["input_tokens"]?.intValue ?? 0
-            let output = usage["output_tokens"]?.intValue ?? 0
-            lines.append(AgentUI.dim("   [TypeSafe: \(input)+\(output) tokens]"))
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private static func formatAnswer(id: String, answer: JSONValue) -> String {
-        guard let obj = answer.objectValue else { return "\(id): (unparseable)" }
-        switch obj["type"]?.stringValue ?? "unknown" {
-        case "noul":   return noulLine(id: id, obj)
-        case "choice": return choiceLine(id: id, obj)
-        case "score":  return scoreLine(id: id, obj)
-        default:       return "\(id): \(obj)"
-        }
-    }
-
-    private static func noulLine(id: String, _ obj: [String: JSONValue]) -> String {
-        let probability = obj["noul"]?.doubleValue ?? 0
-        let percent = Int((probability * 100).rounded())
-        let probabilityText = String(format: "%.2f", probability)
-        return "\(id) [yes/no]: \(probabilityText) — yes with \(percent)% probability"
-    }
-
-    private static func choiceLine(id: String, _ obj: [String: JSONValue]) -> String {
-        let choice = obj["choice"]?.stringValue ?? "?"
-        let confidenceText = String(format: "%.2f", obj["confidence"]?.doubleValue ?? 0)
-        let probabilities = (obj["probabilities"]?.objectValue ?? [:])
-            .map { (option: $0.key, probability: $0.value.doubleValue ?? 0) }
-            .sorted { $0.probability > $1.probability }
-            .map { "\($0.option) \(Int(($0.probability * 100).rounded()))%" }
-            .joined(separator: ", ")
-        return "\(id) [choice]: '\(choice)' (confidence \(confidenceText); \(probabilities))"
-    }
-
-    private static func scoreLine(id: String, _ obj: [String: JSONValue]) -> String {
-        let scoreText = String(format: "%.2f", obj["score"]?.doubleValue ?? 0)
-        let confidenceText = String(format: "%.2f", obj["confidence"]?.doubleValue ?? 0)
-        let legendLevels = (obj["legend"]?.objectValue ?? [:])
-            .map { (level: Int($0.key) ?? 0, label: $0.value.stringValue ?? "") }
-            .sorted { $0.level < $1.level }
-            .compactMap { $0.label }
-            .joined(separator: " < ")
-        return "\(id) [score]: \(scoreText) on \(legendLevels) (confidence \(confidenceText))"
+/// The TypeSafe (Jev) implementation of NaluriBackend.
+struct TypeSafeBackend: NaluriBackend {
+    let apiKey: String
+    func evaluate(state: String, questions: [NaluriQuestion]) async throws -> JSONValue {
+        try await TypeSafeClient.evaluate(state: state, questions: questions, apiKey: apiKey)
     }
 }

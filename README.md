@@ -170,7 +170,7 @@ swift test            # the CI entry point: swift-testing suite (always rebuilds
                       # — no stale-binary trap), runs tests in PARALLEL
 harness --selftest    # the same tool layer + pure loop math as a CLI flag
 harness --e2e         # the LOOP with a scripted STUB MODEL (offline, ms-fast)
-                      #   …plus LIVE legs: provider round-trip + TypeSafe judge
+                      #   …plus LIVE legs: provider round-trip + naluri
 ```
 
 The e2e stub is the key idea: a scripted `ChatModel` drives the real agent
@@ -195,8 +195,10 @@ be reached from tests only via `@testable import`.
   to `arguments` — which `SSEAssembler` stitches back into a full turn. That
   assembler is a pure struct, so `--selftest` unit-tests it with canned chunks.
   Disable with `HARNESS_STREAMING=0`.
-- **Typed judgments (TypeSafe).** The `judge` tool calls TypeSafe's System
-  One model (Jev) — answers with calibrated probabilities, not prose:
+- **Naluri (typed instinct).** *Naluri* is Indonesian for instinct — the
+  System One of Kahneman's pair, as opposed to the chat loop's deliberate System
+  Two. The `naluri` tool calls a backend (today TypeSafe's Jev) that answers
+  with calibrated probabilities, not prose:
   yes/no (noul), pick-one (choice: distribution + confidence), rubric score.
   Enable with `TYPESAFE_API_KEY`. The agent reaches for it when a decision
   wants a number ("is this urgent? 0.96") instead of generated text; Jev

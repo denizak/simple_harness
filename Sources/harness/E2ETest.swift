@@ -8,7 +8,7 @@ import HarnessCore
 // delegation) moved to Tests/HarnessTests — they're deterministic and run
 // under `swift test`. This file keeps only what a stub can't verify:
 //   * a live chat round-trip against the resolved provider
-//   * the TypeSafe judge wire contract against the live API
+//   * the naluri wire contract against the live API
 // behind `--e2e`, because both cost real quota and need network.
 // ---------------------------------------------------------------------------
 
@@ -17,8 +17,8 @@ enum E2ETest {
         print("e2e [live]: round-trip against the configured provider")
         var failures = await liveRoundTrip()
 
-        print("e2e [live]: TypeSafe judge")
-        failures += await liveTypeSafeJudge()
+        print("e2e [live]: naluri")
+        failures += await liveNaluri()
 
         print(failures == 0 ? "e2e: all passed" : AgentUI.errorText("e2e: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
@@ -54,16 +54,16 @@ enum E2ETest {
 
     /// One real TypeSafe judgment (tiny, ~300 input tokens) — exercises the
     /// judge tool's wire contract against the live API. Skipped when no key.
-    private static func liveTypeSafeJudge() async -> Int {
+    private static func liveNaluri() async -> Int {
         var failures = 0
         guard let apiKey = Config.resolve(arguments: []).typesafeApiKey else {
-            print(AgentUI.dim("  – TypeSafe judge skipped (TYPESAFE_API_KEY not set)"))
+            print(AgentUI.dim("  – naluri skipped (TYPESAFE_API_KEY not set)"))
             return 0
         }
         do {
             let root = try await TypeSafeClient.evaluate(
                 state: "Checkout has been broken since 6am; customers cannot complete orders.",
-                questions: [TypeSafeQuestion(
+                questions: [NaluriQuestion(
                     id: "urgent", type: "noul",
                     instructions: "Is this situation urgent?",
                     criteria: .object([
@@ -71,17 +71,17 @@ enum E2ETest {
                         "false": .string("No urgency expressed"),
                     ]))],
                 apiKey: apiKey)
-            let rendered = TypeSafeClient.format(root)
+            let rendered = NaluriFormat.render(root)
             let firstLine = rendered.split(separator: "\n").first.map(String.init) ?? ""
             if rendered.contains("urgent") {
-                print("  ✓ TypeSafe judge live — \(firstLine)")
+                print("  ✓ naluri live — \(firstLine)")
             } else {
                 failures += 1
-                print(AgentUI.errorText("  ✗ TypeSafe judge live: unexpected answer — \(rendered)"))
+                print(AgentUI.errorText("  ✗ naluri live: unexpected answer — \(rendered)"))
             }
         } catch {
             failures += 1
-            print(AgentUI.errorText("  ✗ TypeSafe judge live failed: \(error)"))
+            print(AgentUI.errorText("  ✗ naluri live failed: \(error)"))
         }
         return failures
     }

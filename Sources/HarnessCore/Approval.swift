@@ -26,7 +26,7 @@ import Foundation
 /// Which tools need a human yes before running.
 ///   never     — current behavior; nothing is gated (default).
 ///   dangerous — the mutating/executing set: bash, write_file, edit_file.
-///               (grep, read_file, judge, spawn_agent are read-only or
+///               (grep, read_file, naluri, spawn_agent are read-only or
 ///               delegation: they cannot change the world, so no prompt.)
 ///   all       — every tool call is gated.
 public enum ApprovalPolicy: String, Sendable, CaseIterable {

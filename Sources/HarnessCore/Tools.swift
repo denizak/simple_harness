@@ -28,7 +28,7 @@ private func resolveToolPath(_ path: String, cwd: String) -> URL {
 // ---------------------------------------------------------------------------
 
 public enum Tools {
-    public static let all: [ToolSpec] = [bash, grep, readFile, writeFile, editFile, spawnAgent, TypeSafeJudge.tool]
+    public static let all: [ToolSpec] = [bash, grep, readFile, writeFile, editFile, spawnAgent, NaluriTool.tool]
 
     /// Look up a tool by name; nil if the model invented one.
     public static func named(_ name: String) -> ToolSpec? { all.first { $0.name == name } }
@@ -65,13 +65,13 @@ public enum Tools {
     }
 
     // -----------------------------------------------------------------------
-    // judge — typed judgments via TypeSafe (https://docs.typesafe.ai).
+    // naluri — fast typed judgments (see Naluri.swift).
     //
     // A DIFFERENT primitive than the chat loop: Jev answers typed questions
     // about a state with calibrated probabilities, not prose. Use when a
     // decision wants a number or a selection with confidence — urgency,
     // routing, classification, severity — instead of generated text. The
-    // request/response contract is in TypeSafe.swift; failures are text.
+    // contract is in Naluri.swift; failures are text.
     // -----------------------------------------------------------------------
     /// Run a bounded shell command in its own process group. Both streams are
     /// drained concurrently; the runner retains only a bounded prefix.

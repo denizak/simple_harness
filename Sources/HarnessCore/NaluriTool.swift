@@ -1,23 +1,23 @@
 import Foundation
 
 // ---------------------------------------------------------------------------
-// TypeSafeJudge.swift — the `judge` tool.
+// NaluriTool.swift — the `naluri` tool.
 //
 // Split out of Tools.swift: the enum there outgrew its lint budget, and this
-// tool COHESIVELY pairs with TypeSafe.swift (the wire contract it calls).
-// Registered in Tools.all as TypeSafeJudge.tool.
+// tool COHESIVELY pairs with Naluri.swift (the backend-agnostic contract).
+// Registered in Tools.all as NaluriTool.tool.
 //
 // A DIFFERENT primitive than the chat loop: Jev answers typed questions
 // about a state with calibrated probabilities, not prose. Use when a
 // decision wants a number or a selection with confidence — urgency,
 // routing, classification, severity — instead of generated text. The
-// request/response contract is in TypeSafe.swift; failures are text.
+// contract is in Naluri.swift; failures are text.
 // ---------------------------------------------------------------------------
 
-enum TypeSafeJudge {
+enum NaluriTool {
     static let tool = ToolSpec(
-        name: "judge",
-        description: "Ask TypeSafe's System One model (Jev) for typed judgments with probabilities, " +
+        name: "naluri",
+        description: "Ask naluri (fast instinct, Kahneman's System One) for typed judgments with probabilities, " +
                      "not prose. One call answers several questions against the same text: " +
                      "noul = yes/no probability, choice = pick one option (returns distribution + confidence), " +
                      "score = rate on a rubric (2-10 levels). Use when a calibrated number or selection " +
@@ -78,7 +78,7 @@ enum TypeSafeJudge {
         guard let questionArgs = arguments["questions"]?.arrayValue, !questionArgs.isEmpty else {
             return "error: 'questions' (array) is required"
         }
-        var questions: [TypeSafeQuestion] = []
+        var questions: [NaluriQuestion] = []
         for (index, raw) in questionArgs.enumerated() {
             guard let spec = raw.objectValue, let id = spec["id"]?.stringValue,
                   let type = spec["type"]?.stringValue,
@@ -90,34 +90,34 @@ enum TypeSafeJudge {
                 var criteria: [String: JSONValue] = [:]
                 if let yes = spec["true_means"]?.stringValue { criteria["true"] = .string(yes) }
                 if let no = spec["false_means"]?.stringValue { criteria["false"] = .string(no) }
-                questions.append(TypeSafeQuestion(
+                questions.append(NaluriQuestion(
                     id: id, type: "noul", instructions: question,
                     criteria: criteria.isEmpty ? nil : .object(criteria)))
             case "choice":
                 guard let options = spec["options"]?.objectValue else {
                     return "error: choice question '\(id)' needs 'options' (map of option -> description)"
                 }
-                questions.append(TypeSafeQuestion(
+                questions.append(NaluriQuestion(
                     id: id, type: "choice", instructions: question, criteria: .object(options)))
             case "score":
                 guard let levels = spec["levels"]?.arrayValue else {
                     return "error: score question '\(id)' needs 'levels' (ordered array of descriptions)"
                 }
-                questions.append(TypeSafeQuestion(
+                questions.append(NaluriQuestion(
                     id: id, type: "score", instructions: question, criteria: .array(levels)))
             default:
                 return "error: unknown type '\(type)' in '\(id)' (use noul, choice or score)"
             }
         }
-        guard let apiKey = context.config.typesafeApiKey else {
-            return "error: TYPESAFE_API_KEY is not set — judge cannot reach TypeSafe"
+        guard let backend = context.config.naluriBackend else {
+            return "error: \(context.config.naluriSetupHint)"
         }
         do {
-            let root = try await TypeSafeClient.evaluate(
-                state: String(state.prefix(50_000)), questions: questions, apiKey: apiKey)
-            return TypeSafeClient.format(root)
+            let root = try await backend.evaluate(
+                state: String(state.prefix(50_000)), questions: questions)
+            return NaluriFormat.render(root)
         } catch {
-            return "error: TypeSafe call failed — \(error)"
+            return "error: naluri call failed — \(error)"
         }
     }
 }

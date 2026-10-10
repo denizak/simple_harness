@@ -177,7 +177,7 @@ uses.
   applies at depth 1; nothing new to configure.
 - *Policy levels:* `never` (default — current behavior, all existing tests unchanged),
   `dangerous` (`bash`, `write_file`, `edit_file` — the mutating/executing set;
-  `grep`, `read_file`, `judge`, `spawn_agent` are read-only or delegation), `all`.
+  `grep`, `read_file`, `naluri`, `spawn_agent` are read-only or delegation), `all`.
 - *Denied calls* return a tool-result error naming the tool, so the model can adapt
   (propose something else) on its next turn — exactly like T3's unavailable-tool path.
   A denial still consumes a turn; that is inherent to results-as-text.
@@ -210,7 +210,7 @@ uses.
 **Acceptance tests:**
 - Policy `never` changes nothing: the existing 43-test suite passes unmodified.
 - `dangerous` prompts for `bash`/`write_file`/`edit_file` and never for
-  `grep`/`read_file`/`judge`.
+  `grep`/`read_file`/`naluri`.
 - A scripted deny produces exactly one tool result per call ID and the target file in a
   temporary directory is untouched (proved by content, not by mocking).
 - Denial text names the tool and the loop continues: a scripted model that is denied

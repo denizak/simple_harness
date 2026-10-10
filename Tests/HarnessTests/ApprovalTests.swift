@@ -141,7 +141,7 @@ struct ApprovalRuleTests {
         #expect(ApprovalPolicy.dangerous.requiresApproval(tool: "bash", alreadyApproved: false))
         #expect(ApprovalPolicy.dangerous.requiresApproval(tool: "write_file", alreadyApproved: false))
         #expect(ApprovalPolicy.dangerous.requiresApproval(tool: "edit_file", alreadyApproved: false))
-        for tool in ["grep", "read_file", "spawn_agent", "judge"] {
+        for tool in ["grep", "read_file", "spawn_agent", "naluri"] {
             #expect(!ApprovalPolicy.dangerous.requiresApproval(tool: tool, alreadyApproved: false))
         }
         for tool in ApprovalPolicy.dangerousTools + ["grep", "read_file"] {
