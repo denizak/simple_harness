@@ -62,6 +62,9 @@ public struct ProviderProfile: Sendable {
     /// Environment variables that may hold this provider's API key.
     public var envKeys: [String]
     public var defaultModel: String
+    /// Cheap model used when this provider backs naluri (ChatNaluri); nil
+    /// falls back to defaultModel. Override per run with HARNESS_NALURI_MODEL.
+    public var naluriModel: String?
     /// Key-acquisition policy — see KeyResolution.
     public var keyResolution: KeyResolution
     /// Token-limit field quirk (see TokenLimitField).
@@ -77,6 +80,7 @@ public struct ProviderProfile: Sendable {
         baseURL: String,
         envKeys: [String],
         defaultModel: String,
+        naluriModel: String? = nil,
         keyResolution: KeyResolution = .envOnly,
         tokenLimitField: TokenLimitField = .maxTokens,
         sendsStreamOptions: Bool = false
@@ -85,6 +89,7 @@ public struct ProviderProfile: Sendable {
         self.baseURL = baseURL
         self.envKeys = envKeys
         self.defaultModel = defaultModel
+        self.naluriModel = naluriModel
         self.keyResolution = keyResolution
         self.tokenLimitField = tokenLimitField
         self.sendsStreamOptions = sendsStreamOptions
@@ -113,6 +118,7 @@ public extension Config {
             baseURL: "https://api.z.ai/api/paas/v4",
             envKeys: ["ZAI_API_KEY", "Z_AI_API_KEY", "ZHIPU_API_KEY"],
             defaultModel: "glm-4.6",
+            naluriModel: "glm-5.3-flash",
             keyResolution: .envThenBorrow(piAuthEntry: "zai")
         ),
         // GLM Coding Plan (https://docs.z.ai/devpack/quick-start): the plan
@@ -125,6 +131,7 @@ public extension Config {
             baseURL: "https://api.z.ai/api/coding/paas/v4",
             envKeys: ["ZAI_CODING_API_KEY"],
             defaultModel: "glm-4.6",
+            naluriModel: "glm-5.3-flash",
             keyResolution: .envThenBorrow(piAuthEntry: "zai")
         ),
         // China-region coding plan (matches pi's zai-coding-cn provider).
@@ -133,6 +140,7 @@ public extension Config {
             baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
             envKeys: ["ZAI_CODING_CN_API_KEY"],
             defaultModel: "glm-5.3",
+            naluriModel: "glm-5.3-flash",
             keyResolution: .envThenBorrow(piAuthEntry: "zai-coding-cn")
         ),
         // DeepSeek: OpenAI-compatible at the root (the client appends
@@ -142,6 +150,7 @@ public extension Config {
             baseURL: "https://api.deepseek.com",
             envKeys: ["DEEPSEEK_API_KEY"],
             defaultModel: "deepseek-flash",
+            naluriModel: "deepseek-flash",
             keyResolution: .envThenBorrowForAutodetect(piAuthEntry: "deepseek")
         ),
         // Anthropic: the one catalog provider that does NOT speak the

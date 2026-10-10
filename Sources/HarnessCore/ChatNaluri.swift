@@ -25,14 +25,6 @@ struct ChatNaluri: NaluriBackend {
     let model: String
     let apiKey: String
 
-    /// Default naluri model per catalog provider (cheap "flash" tiers).
-    static func defaultModel(for profile: ProviderProfile) -> String {
-        switch profile.name {
-        case "zai", "zai-coding", "zai-coding-cn": return "glm-5.3-flash"
-        default: return profile.defaultModel
-        }
-    }
-
     // MARK: pure helpers (unit-tested)
 
     /// The prompt for one question plus the single-token answers it allows

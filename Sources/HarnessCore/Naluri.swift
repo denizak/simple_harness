@@ -39,7 +39,7 @@ extension Config {
         let key = profile.key(in: ProcessInfo.processInfo.environment)
             ?? (provider == name ? apiKey : nil)
         guard let key, !key.isEmpty, key != "none" else { return nil }
-        return ChatNaluri(profile: profile, model: naluriModel ?? ChatNaluri.defaultModel(for: profile), apiKey: key)
+        return ChatNaluri(profile: profile, model: naluriModel ?? profile.naluriModel ?? profile.defaultModel, apiKey: key)
     }
 
     /// Why no backend resolved — shown by the tool and gate.
