@@ -34,9 +34,11 @@ extension Config {
         guard let name else { return nil }
         if name == "typesafe" { return typesafeApiKey.map { TypeSafeBackend(apiKey: $0) } }
         guard let profile = Config.catalog[name], profile.name != "anthropic" else { return nil }
-        let key = (provider == name ? apiKey : nil)
-            ?? profile.key(in: ProcessInfo.processInfo.environment)
-        guard let key, key != "none" else { return nil }
+        // The provider's own env key wins: the main config's apiKey may come
+        // from a config file written for a different purpose (or be stale).
+        let key = profile.key(in: ProcessInfo.processInfo.environment)
+            ?? (provider == name ? apiKey : nil)
+        guard let key, !key.isEmpty, key != "none" else { return nil }
         return ChatNaluri(profile: profile, model: naluriModel ?? ChatNaluri.defaultModel(for: profile), apiKey: key)
     }
 
