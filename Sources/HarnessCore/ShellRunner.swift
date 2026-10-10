@@ -20,7 +20,7 @@ private final class BoundedPipeReader: @unchecked Sendable {
     }
 
     func start() {
-        DispatchQueue.global(qos: .utility).async { [self] in
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
             defer { finished.signal() }
             var buffer = [UInt8](repeating: 0, count: 8192)
             while true {

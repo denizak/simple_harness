@@ -34,6 +34,15 @@ public struct AgentEvalCase: Codable, Sendable {
     public var solution: String
     public var timeoutSec: Int?
     public var maxTurns: Int?
+    /// Files written into the work dir only right before `check` runs — stricter
+    /// tests the agent never sees, so a hardcoded or minimal fix fails.
+    public var hidden: [String: String]?
+    /// Extra environment for the `--once` run (e.g. HARNESS_COMPACT_BYTES to
+    /// force compaction on a short task).
+    public var env: [String: String]?
+    /// A tool the run must have called at least once (e.g. "spawn_agent"); a
+    /// passing check without it still fails the case.
+    public var requiresTool: String?
 
     public static func load(path: String) throws -> [AgentEvalCase] {
         try JSONDecoder().decode([AgentEvalCase].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
@@ -50,6 +59,11 @@ public struct AgentEvalRun: Codable, Sendable {
     public var timedOut: Bool
     public var turns: Int
     public var toolCalls: Int
+    /// Tool name → calls, from the transcript.
+    public var toolCounts: [String: Int]?
+    /// Compactions observed in the transcript (a `replace` event each) — proves a
+    /// "long task" case really exercised compaction.
+    public var compactions: Int?
     public var inputTokens: Int
     public var outputTokens: Int
     public var wallMs: Int
@@ -73,8 +87,13 @@ public enum AgentEvalSupport {
 
     /// Write a case's seed files under `directory`.
     public static func setUp(_ testCase: AgentEvalCase, in directory: String) throws {
+        try writeFiles(testCase.files, in: directory)
+    }
+
+    /// Write relative-path → contents files (creating parent directories).
+    public static func writeFiles(_ files: [String: String]?, in directory: String) throws {
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        for (path, contents) in testCase.files ?? [:] {
+        for (path, contents) in files ?? [:] {
             let url = URL(fileURLWithPath: directory).appendingPathComponent(path)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -89,15 +108,25 @@ public enum AgentEvalSupport {
 
     /// Assistant tool calls in a JSONL session log (the transcript).
     public static func toolCallCount(sessionLogPath: String) -> Int {
-        guard let text = try? String(contentsOfFile: sessionLogPath, encoding: .utf8) else { return 0 }
-        var count = 0
+        transcriptStats(sessionLogPath: sessionLogPath).toolCounts.values.reduce(0, +)
+    }
+
+    /// Per-tool call counts and compaction (`replace`) events from a transcript.
+    public static func transcriptStats(sessionLogPath: String) -> (toolCounts: [String: Int], compactions: Int) {
+        guard let text = try? String(contentsOfFile: sessionLogPath, encoding: .utf8) else { return ([:], 0) }
+        var counts: [String: Int] = [:]
+        var compactions = 0
         for line in text.split(separator: "\n") {
-            guard let event = JSONValue.parse(String(line))?.objectValue,
-                  let message = event["message"]?.objectValue,
+            guard let event = JSONValue.parse(String(line))?.objectValue else { continue }
+            if event["kind"]?.stringValue == "replace" { compactions += 1; continue }
+            guard let message = event["message"]?.objectValue,
                   message["role"]?.stringValue == "assistant" else { continue }
-            count += message["tool_calls"]?.arrayValue?.count ?? 0
+            for call in message["tool_calls"]?.arrayValue ?? [] {
+                let name = call.objectValue?["function"]?.objectValue?["name"]?.stringValue ?? "?"
+                counts[name, default: 0] += 1
+            }
         }
-        return count
+        return (counts, compactions)
     }
 }
 
@@ -156,6 +185,10 @@ public enum AgentEval {
             defer { try? FileManager.default.removeItem(atPath: root) }
             do { try AgentEvalSupport.setUp(testCase, in: root) } catch {
                 problems.append("\(testCase.id): cannot seed files (\(error))")
+                continue
+            }
+            do { try AgentEvalSupport.writeFiles(testCase.hidden, in: root) } catch {
+                problems.append("\(testCase.id): cannot write hidden files (\(error))")
                 continue
             }
             let before = await ShellRunner.run(command: testCase.check, cwd: root, timeout: 60)
@@ -237,7 +270,8 @@ public enum AgentEval {
         let usagePath = meta + "/usage.jsonl"
         let transcript = meta + "/transcript.jsonl"
         let q = AgentEvalSupport.shellQuote
-        let command = "HARNESS_USAGE_LOG=\(q(usagePath)) \(q(executable)) --once \"$(cat \(q(meta + "/task.txt")))\""
+        let extraEnv = (testCase.env ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\(q($0.value)) " }.joined()
+        let command = extraEnv + "HARNESS_USAGE_LOG=\(q(usagePath)) \(q(executable)) --once \"$(cat \(q(meta + "/task.txt")))\""
             + " --no-gate --approval never --no-streaming --session-log \(q(transcript))"
             + " --max-turns \(testCase.maxTurns ?? 25) " + forwardedFlags.map(q).joined(separator: " ")
 
@@ -251,13 +285,21 @@ public enum AgentEval {
         result.turns = totals.turns
         result.inputTokens = totals.prompt
         result.outputTokens = totals.completion
-        result.toolCalls = AgentEvalSupport.toolCallCount(sessionLogPath: transcript)
+        let stats = AgentEvalSupport.transcriptStats(sessionLogPath: transcript)
+        result.toolCounts = stats.toolCounts
+        result.toolCalls = stats.toolCounts.values.reduce(0, +)
+        result.compactions = stats.compactions
         result.costUSD = AgentEvalPricing.cost(provider: provider, input: totals.prompt, output: totals.completion)
 
+        try? AgentEvalSupport.writeFiles(testCase.hidden, in: work)
         let check = await ShellRunner.run(command: testCase.check, cwd: work, timeout: 60)
-        result.passed = AgentEvalSupport.exitCode(of: check) == 0
+        let checkPassed = AgentEvalSupport.exitCode(of: check) == 0
+        let toolMissing = testCase.requiresTool.map { (stats.toolCounts[$0] ?? 0) == 0 } ?? false
+        result.passed = checkPassed && !toolMissing
         if !result.passed {
-            result.checkOutput = String(check.prefix(400))
+            result.checkOutput = checkPassed
+                ? "check passed but required tool '\(testCase.requiresTool ?? "")' was never called"
+                : String(check.prefix(400))
             result.artifactDir = root
             try? report.write(toFile: meta + "/stdout.txt", atomically: true, encoding: .utf8)
         } else {
@@ -304,6 +346,8 @@ public enum AgentEval {
         let groups = byGroup.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value.0)/\($0.value.1)" }.joined(separator: ", ")
         lines.append("pass rate: \(passed)/\(total)" + (total > 0 ? String(format: " (%.0f%%)", Double(passed) / Double(total) * 100) : "")
             + "  —  \(groups)")
+        let compacted = report.runs.filter { ($0.compactions ?? 0) > 0 }.count
+        if compacted > 0 { lines.append("runs where compaction fired: \(compacted)/\(total)") }
         let timeouts = report.runs.filter(\.timedOut).count
         let capped = report.runs.filter { !$0.passed && $0.harnessExit != 0 && !$0.timedOut }.count
         lines.append("failed runs that timed out: \(timeouts); ended with a harness error/turn cap: \(capped)"

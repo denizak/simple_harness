@@ -1,0 +1,178 @@
+[
+ {
+  "id": "hidden-parse-duration",
+  "group": "hidden",
+  "task": "Implement parse_duration in durations.py so that test_durations.py passes. It should parse strings made of hours, minutes and seconds like '1h30m', '2h', '45s' or '1h 15m 10s' into a number of seconds, and raise ValueError for anything that is not a valid duration.",
+  "check": "python3 test_durations.py | grep -q ok && python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "cat > durations.py <<'EOF'\nimport re\n\n_PART = re.compile(r\"(\\d+)([hms])\")\n\n\ndef parse_duration(text):\n    s = text.strip()\n    if not s:\n        raise ValueError(\"empty duration\")\n    units = {\"h\": 3600, \"m\": 60, \"s\": 1}\n    pos, total = 0, 0\n    while pos < len(s):\n        m = _PART.match(s, pos)\n        if not m:\n            raise ValueError(\"bad duration: %r\" % text)\n        total += int(m.group(1)) * units[m.group(2)]\n        pos = m.end()\n        while pos < len(s) and s[pos] == \" \":\n            pos += 1\n    return total\nEOF",
+  "files": {
+   "durations.py": "def parse_duration(text):\n    raise NotImplementedError\n",
+   "test_durations.py": "from durations import parse_duration\n\nassert parse_duration(\"45s\") == 45\nassert parse_duration(\"2h\") == 7200\nassert parse_duration(\"10m\") == 600\nprint(\"ok\")\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "from durations import parse_duration\n\ncases = {\"1h30m\": 5400, \"1h 15m 10s\": 4510, \"90m\": 5400, \"0s\": 0, \"2h\": 7200}\nfor text, want in cases.items():\n    assert parse_duration(text) == want, (text, parse_duration(text))\nfor bad in [\"\", \"h\", \"5x\", \"1h junk\", \"m30\"]:\n    try:\n        parse_duration(bad)\n    except ValueError:\n        continue\n    raise AssertionError(\"no ValueError for %r\" % bad)\nprint(\"hidden ok\")\n"
+  }
+ },
+ {
+  "id": "misleading-keyerror",
+  "group": "misleading",
+  "task": "`python3 main.py` crashes with KeyError: 'total'. Fix the bug so it prints 'Total: 3450.50'. Do not edit orders.csv.",
+  "check": "python3 main.py | grep -qx \"Total: 3450.50\" && python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "cat > loader.py <<'EOF'\nimport csv\n\n\ndef load_orders(path):\n    rows = []\n    with open(path, newline=\"\") as f:\n        for row in csv.DictReader(f):\n            try:\n                row[\"amount\"] = float(row[\"amount\"].replace(\"$\", \"\").replace(\",\", \"\"))\n            except ValueError:\n                continue\n            rows.append(row)\n    return rows\nEOF",
+  "files": {
+   "orders.csv": "id,amount\n1,\"$1,200.00\"\n2,\"$2,250.50\"\n",
+   "loader.py": "import csv\n\n\ndef load_orders(path):\n    rows = []\n    with open(path, newline=\"\") as f:\n        for row in csv.DictReader(f):\n            try:\n                row[\"amount\"] = float(row[\"amount\"].replace(\"$\", \"\"))\n            except ValueError:\n                continue\n            rows.append(row)\n    return rows\n",
+   "aggregate.py": "def totals(rows):\n    if not rows:\n        return {}\n    return {\"total\": sum(r[\"amount\"] for r in rows), \"count\": len(rows)}\n",
+   "report.py": "def render(summary):\n    return \"Total: %.2f\" % summary[\"total\"]\n",
+   "main.py": "from loader import load_orders\nfrom aggregate import totals\nfrom report import render\n\nprint(render(totals(load_orders(\"orders.csv\"))))\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "import hashlib\nfrom loader import load_orders\n\nassert hashlib.sha256(open(\"orders.csv\", \"rb\").read()).hexdigest() == \"a2dfc91b2448eee7d6a31b86d1f614d71d8d044bf4ed6c753ff512ee818b559a\", \"orders.csv was edited\"\nopen(\"_h.csv\", \"w\").write('id,amount\\n1,\"$1,000,000.25\"\\n2,7\\n3,$5.00\\n4,\"1,000\"\\n')\nrows = load_orders(\"_h.csv\")\nassert [r[\"amount\"] for r in rows] == [1000000.25, 7.0, 5.0, 1000.0], rows\nprint(\"hidden ok\")\n"
+  }
+ },
+ {
+  "id": "search-decoy-timeouts",
+  "group": "search",
+  "task": "Change the HTTP client's default request timeout from 30 seconds to 60 seconds. Only the HTTP client's default: other timeouts in this project (FTP, database, cache, job worker, retry backoff) must stay as they are.",
+  "check": "python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "sed 's/DEFAULT_TIMEOUT = 30/DEFAULT_TIMEOUT = 60/' net/client.py > c.tmp && mv c.tmp net/client.py",
+  "files": {
+   "auth/tokens.py": "def make_token(user):\n    return 'tok-' + user\n\n\ndef parse_token(token):\n    return token[4:]\n",
+   "auth/session.py": "SESSION_TTL = 3600\n\n\ndef expired(age):\n    return age > SESSION_TTL\n",
+   "auth/hashing.py": "import hashlib\n\n\ndef digest(text):\n    return hashlib.sha256(text.encode()).hexdigest()\n",
+   "api/routes.py": "ROUTES = {'/health': 'ok', '/version': '1.0'}\n\n\ndef lookup(path):\n    return ROUTES.get(path)\n",
+   "api/schema.py": "def validate(payload):\n    return isinstance(payload, dict) and 'id' in payload\n",
+   "api/errors.py": "class ApiError(Exception):\n    pass\n\n\nclass NotFound(ApiError):\n    pass\n",
+   "utils/text.py": "def shout(s):\n    return s.upper() + '!'\n\n\ndef squash(s):\n    return ' '.join(s.split())\n",
+   "utils/dates.py": "def iso(year, month, day):\n    return '%04d-%02d-%02d' % (year, month, day)\n",
+   "utils/files.py": "import os\n\n\ndef ext(path):\n    return os.path.splitext(path)[1]\n",
+   "utils/ids.py": "import itertools\n\n_counter = itertools.count(1)\n\n\ndef next_id():\n    return next(_counter)\n",
+   "jobs/queue.py": "from collections import deque\n\n_Q = deque()\n\n\ndef push(job):\n    _Q.append(job)\n\n\ndef pop():\n    return _Q.popleft()\n",
+   "jobs/worker.py": "JOB_TIMEOUT = 30\n\n\ndef run(job):\n    return job()\n",
+   "config/settings.py": "SETTINGS = {'db_timeout': 30, 'cache_timeout': 30, 'retries': 3}\n",
+   "db/conn.py": "DB_TIMEOUT = 30\n\n\ndef connect(url):\n    return {'url': url, 'timeout': DB_TIMEOUT}\n",
+   "db/pool.py": "POOL_SIZE = 5\n\n\ndef size():\n    return POOL_SIZE\n",
+   "db/migrate.py": "def plan(current, target):\n    return list(range(current + 1, target + 1))\n",
+   "cache/store.py": "CACHE_TIMEOUT = 30\n\n_DATA = {}\n\n\ndef get(key):\n    return _DATA.get(key)\n\n\ndef put(key, value):\n    _DATA[key] = value\n",
+   "cache/evict.py": "def evict_oldest(items):\n    return items[1:]\n",
+   "net/ftp.py": "DEFAULT_TIMEOUT = 30\n\n\nclass FtpClient:\n    def __init__(self, timeout=DEFAULT_TIMEOUT):\n        self.timeout = timeout\n",
+   "net/retry.py": "BACKOFF_SECONDS = 30\n\n\ndef delay(attempt):\n    return BACKOFF_SECONDS * attempt\n",
+   "net/dns.py": "def resolve(name):\n    return '127.0.0.1' if name == 'localhost' else None\n",
+   "net/client.py": "DEFAULT_TIMEOUT = 30\n\n\nclass Client:\n    def __init__(self, timeout=DEFAULT_TIMEOUT):\n        self.timeout = timeout\n\n    def get(self, url):\n        return {'url': url, 'timeout': self.timeout}\n",
+   "tests/test_client.py": "from net import client\n\n\ndef test_default_timeout():\n    assert client.Client().timeout == client.DEFAULT_TIMEOUT\n",
+   "tests/test_db.py": "from db import conn\n\n\ndef test_connect():\n    assert conn.connect('x')['timeout'] == conn.DB_TIMEOUT\n",
+   "docs/config.md": "# Config\n\nThe HTTP client default timeout is 30 seconds. The database timeout is also 30 seconds.\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "from net.client import Client, DEFAULT_TIMEOUT\nassert DEFAULT_TIMEOUT == 60 and Client().timeout == 60\nassert Client(5).timeout == 5\nfrom net import ftp, retry\nassert ftp.DEFAULT_TIMEOUT == 30 and retry.BACKOFF_SECONDS == 30\nimport db.conn as c\nimport cache.store as s\nimport jobs.worker as w\nassert c.DB_TIMEOUT == 30 and s.CACHE_TIMEOUT == 30 and w.JOB_TIMEOUT == 30\nfrom config.settings import SETTINGS\nassert SETTINGS[\"db_timeout\"] == 30 and SETTINGS[\"cache_timeout\"] == 30\nprint(\"hidden ok\")\n"
+  }
+ },
+ {
+  "id": "follow-convention-cli",
+  "group": "convention",
+  "task": "Add a `version` command to the CLI that prints the contents of the VERSION file. Follow the existing conventions of the project.",
+  "check": "python3 cli.py version | grep -qx 1.4.2 && python3 cli.py --help | grep \"^version\" | grep -qE \"[[:space:]].+\" && python3 cli.py add 2 3 | grep -qx 5 && python3 cli.py hello | grep -qx hello && test -f commands/version.py",
+  "solution": "cat > commands/version.py <<'EOF'\nfrom registry import command\n\n\n@command(\"version\", help=\"Print the version\")\ndef version(args):\n    print(open(\"VERSION\").read().strip())\nEOF",
+  "files": {
+   "VERSION": "1.4.2\n",
+   "registry.py": "COMMANDS = {}\n\n\ndef command(name, help=\"\"):\n    def register(fn):\n        COMMANDS[name] = (fn, help)\n        return fn\n\n    return register\n",
+   "cli.py": "import importlib\nimport pkgutil\nimport sys\n\nimport commands\nfrom registry import COMMANDS\n\nfor module in pkgutil.iter_modules(commands.__path__):\n    importlib.import_module(\"commands.\" + module.name)\n\n\ndef main(argv):\n    if len(argv) < 2 or argv[1] in (\"-h\", \"--help\"):\n        for name in sorted(COMMANDS):\n            print(\"%s\\t%s\" % (name, COMMANDS[name][1]))\n        return 0\n    name = argv[1]\n    if name not in COMMANDS:\n        print(\"unknown command: \" + name)\n        return 2\n    COMMANDS[name][0](argv[2:])\n    return 0\n\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv))\n",
+   "commands/__init__.py": "",
+   "commands/hello.py": "from registry import command\n\n\n@command(\"hello\", help=\"Print a greeting\")\ndef hello(args):\n    print(\"hello\")\n",
+   "commands/add.py": "from registry import command\n\n\n@command(\"add\", help=\"Add integers\")\ndef add(args):\n    print(sum(int(a) for a in args))\n"
+  }
+ },
+ {
+  "id": "iterate-expression-bugs",
+  "group": "iterate",
+  "task": "calc.py evaluates arithmetic expressions and test_calc.py has failing tests. Run the tests, find and fix every bug in calc.py until they all pass. Do not edit the tests.",
+  "check": "python3 test_calc.py | grep -q ok && [ \"$(grep -c \"assert evaluate\" test_calc.py)\" = 3 ] && python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "cat > calc.py <<'EOF'\nimport re\n\nTOKEN = re.compile(r\"\\s*(\\d+\\.?\\d*|[-+*/()])\")\n\n\ndef tokenize(s):\n    pos, out = 0, []\n    s = s.strip()\n    while pos < len(s):\n        m = TOKEN.match(s, pos)\n        if not m:\n            raise ValueError(\"bad character at %d\" % pos)\n        out.append(m.group(1))\n        pos = m.end()\n    return out\n\n\ndef evaluate(s):\n    value, rest = expr(tokenize(s))\n    if rest:\n        raise ValueError(\"trailing tokens\")\n    return value\n\n\ndef expr(t):\n    value, t = term(t)\n    while t and t[0] in \"+-\":\n        op = t[0]\n        rhs, t = term(t[1:])\n        value = value + rhs if op == \"+\" else value - rhs\n    return value, t\n\n\ndef term(t):\n    value, t = factor(t)\n    while t and t[0] in \"*/\":\n        op = t[0]\n        rhs, t = factor(t[1:])\n        value = value * rhs if op == \"*\" else value / rhs\n    return value, t\n\n\ndef factor(t):\n    if not t:\n        raise ValueError(\"unexpected end\")\n    tok = t[0]\n    if tok == \"-\":\n        value, t = factor(t[1:])\n        return -value, t\n    if tok == \"(\":\n        value, t = expr(t[1:])\n        if not t or t[0] != \")\":\n            raise ValueError(\"missing )\")\n        return value, t[1:]\n    return float(tok), t[1:]\nEOF",
+  "files": {
+   "calc.py": "import re\n\nTOKEN = re.compile(r\"\\s*(\\d+\\.?\\d*|[-+*/()])\")\n\n\ndef tokenize(s):\n    pos, out = 0, []\n    s = s.strip()\n    while pos < len(s):\n        m = TOKEN.match(s, pos)\n        if not m:\n            raise ValueError(\"bad character at %d\" % pos)\n        out.append(m.group(1))\n        pos = m.end()\n    return out\n\n\ndef evaluate(s):\n    value, rest = expr(tokenize(s))\n    if rest:\n        raise ValueError(\"trailing tokens\")\n    return value\n\n\ndef expr(t):\n    value, t = term(t)\n    while t and t[0] in \"+-\":\n        op = t[0]\n        rhs, t = term(t[1:])\n        value = value + rhs if op == \"+\" else value - rhs\n    return value, t\n\n\ndef term(t):\n    value, t = factor(t)\n    while t and t[0] in \"*/\":\n        op = t[0]\n        rhs, t = factor(t[1:])\n        value = value * rhs if op == \"*\" else value // rhs\n    return value, t\n\n\ndef factor(t):\n    if not t:\n        raise ValueError(\"unexpected end\")\n    tok = t[0]\n    if tok == \"(\":\n        value, t = expr(t[1:])\n        return value, t[1:]\n    return float(tok), t[1:]\n",
+   "test_calc.py": "from calc import evaluate\n\nassert evaluate(\"2*(3+4)\") == 14\nassert evaluate(\"7/2\") == 3.5\nassert evaluate(\"-3+5\") == 2\ntry:\n    evaluate(\"(1+2\")\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError(\"expected ValueError\")\nprint(\"ok\")\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "from calc import evaluate\n\nfor text, want in {\"-(2+3)\": -5, \"2*-3\": -6, \"10/4/5\": 0.5, \"((2))\": 2, \"1 + 2 * 3\": 7, \"8/(2+2)\": 2}.items():\n    assert evaluate(text) == want, (text, evaluate(text))\nfor bad in [\")\", \"1 2\", \"(1+2\", \"*3\", \"\"]:\n    try:\n        evaluate(bad)\n    except ValueError:\n        continue\n    raise AssertionError(\"no ValueError for %r\" % bad)\nprint(\"hidden ok\")\n"
+  },
+  "maxTurns": 30
+ },
+ {
+  "id": "delegate-to-subagents",
+  "group": "delegation",
+  "task": "Create three modules in the current directory: square.py with a function square(x), cube.py with cube(x), and double.py with double(x), each returning the obvious result. You must use the spawn_agent tool to have a separate sub-agent write each of the three files.",
+  "check": "python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "printf 'def square(x):\\n    return x * x\\n' > square.py; printf 'def cube(x):\\n    return x ** 3\\n' > cube.py; printf 'def double(x):\\n    return 2 * x\\n' > double.py",
+  "hidden": {
+   "_hidden_check.py": "from square import square\nfrom cube import cube\nfrom double import double\nassert square(4) == 16 and square(-3) == 9\nassert cube(3) == 27 and cube(-2) == -8\nassert double(21) == 42 and double(0) == 0\nprint(\"hidden ok\")\n"
+  },
+  "requiresTool": "spawn_agent",
+  "timeoutSec": 600
+ },
+ {
+  "id": "long-compaction-recall",
+  "group": "long",
+  "task": "The six files notes/part1.txt to notes/part6.txt each contain one line starting with 'FINAL part N:' followed by a token. Ignore lines marked DRAFT. Read the files one at a time with read_file (one call per file), in order, then write the six FINAL tokens in order, joined with hyphens on a single line, into secret.txt.",
+  "check": "test \"$(tr -d \"[:space:]\" < secret.txt)\" = \"Zx4kQ9mP-Lw7TnB2d-Rg5YhC8s-Vb3JfD6a-Nq1KuE0t-Hc9MsA7w\"",
+  "solution": "printf '%s' 'Zx4kQ9mP-Lw7TnB2d-Rg5YhC8s-Vb3JfD6a-Nq1KuE0t-Hc9MsA7w' > secret.txt",
+  "files": {
+   "notes/part1.txt": "The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. DRAFT part 1: Wq8rTy3u (superseded, do not use)\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. FINAL part 1: Zx4kQ9mP\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. ",
+   "notes/part2.txt": "The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. DRAFT part 2: Pe2oIu5l (superseded, do not use)\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. FINAL part 2: Lw7TnB2d\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. ",
+   "notes/part3.txt": "The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. DRAFT part 3: Ak6sDf1g (superseded, do not use)\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. FINAL part 3: Rg5YhC8s\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. ",
+   "notes/part4.txt": "The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. DRAFT part 4: Jm4nBv7c (superseded, do not use)\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. FINAL part 4: Vb3JfD6a\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. ",
+   "notes/part5.txt": "The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. DRAFT part 5: Xz0cVb9n (superseded, do not use)\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. FINAL part 5: Nq1KuE0t\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. ",
+   "notes/part6.txt": "The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. DRAFT part 6: Ty3uRe6w (superseded, do not use)\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. FINAL part 6: Hc9MsA7w\nThe committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. The committee reviewed the quarterly logistics summary and noted several recurring scheduling conflicts across the regional offices. "
+  },
+  "env": {
+   "HARNESS_COMPACT_BYTES": "7000"
+  },
+  "timeoutSec": 600
+ },
+ {
+  "id": "refactor-extract-helper",
+  "group": "refactor",
+  "task": "Refactor pricing.py so the discount arithmetic lives in one helper function apply_discount(base, rate), and price_member, price_vip and price_staff all call it. Behavior must not change.",
+  "check": "python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "cat > pricing.py <<'EOF'\ndef apply_discount(base, rate):\n    return round(base * (1 - rate), 2)\n\n\ndef price_member(base):\n    return apply_discount(base, 0.10)\n\n\ndef price_vip(base):\n    return apply_discount(base, 0.20)\n\n\ndef price_staff(base):\n    return apply_discount(base, 0.30)\nEOF",
+  "files": {
+   "pricing.py": "def price_member(base):\n    return round(base * (1 - 0.10), 2)\n\n\ndef price_vip(base):\n    return round(base * (1 - 0.20), 2)\n\n\ndef price_staff(base):\n    return round(base * (1 - 0.30), 2)\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "import ast\n\ntree = ast.parse(open(\"pricing.py\").read())\nfuncs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}\nassert \"apply_discount\" in funcs and len(funcs[\"apply_discount\"].args.args) == 2, \"no apply_discount(base, rate)\"\nfor name in (\"price_member\", \"price_vip\", \"price_staff\"):\n    calls = [c.func.id for c in ast.walk(funcs[name]) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)]\n    assert \"apply_discount\" in calls, name + \" does not call apply_discount\"\nfrom pricing import price_member, price_vip, price_staff\nassert price_member(100) == 90.0 and price_vip(100) == 80.0\nassert price_staff(19.99) == 13.99 and price_vip(33.33) == 26.66\nprint(\"hidden ok\")\n"
+  }
+ },
+ {
+  "id": "fix-circular-import",
+  "group": "circular",
+  "task": "`python3 main.py` fails with an ImportError. Fix the circular import so main.py prints 'ab'. Do not delete or merge a.py and b.py; both must keep all their functions.",
+  "check": "python3 main.py | grep -qx ab && python3 _hidden_check.py | grep -q \"hidden ok\" && grep -q \"def a_func\" a.py && grep -q b_func a.py && grep -q \"def b_uses_a\" b.py",
+  "solution": "printf 'def b_func():\\n    return \"b\"\\n\\n\\ndef b_uses_a():\\n    from a import a_func\\n    return a_func()\\n' > b.py",
+  "files": {
+   "a.py": "from b import b_func\n\n\ndef a_func():\n    return \"a\" + b_func()\n",
+   "b.py": "from a import a_func\n\n\ndef b_func():\n    return \"b\"\n\n\ndef b_uses_a():\n    return a_func()\n",
+   "main.py": "import a\n\nprint(a.a_func())\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "import subprocess\nimport sys\n\nfor order in (\"import a; import b\", \"import b; import a\"):\n    subprocess.check_call([sys.executable, \"-c\", order])\nimport a, b\nassert a.a_func() == \"ab\" and b.b_uses_a() == \"ab\" and b.b_func() == \"b\"\nprint(\"hidden ok\")\n"
+  }
+ },
+ {
+  "id": "precision-copyright-year",
+  "group": "precision",
+  "task": "Update the copyright year from 2025 to 2026 in the header line (the first line) of every .py file under src/. Do not change anything else: not the files under vendor/, and not any other mention of 2025.",
+  "check": "python3 _hidden_check.py | grep -q \"hidden ok\"",
+  "solution": "find src -name '*.py' | while read f; do sed '1s/2025/2026/' \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; done",
+  "files": {
+   "src/billing.py": "# Copyright 2025 Acme Corp\n# Q4 2025 planning: revisit rounding.\nVERSION = \"2025.1\"\n",
+   "src/auth.py": "# Copyright 2025 Acme Corp\nimport hashlib\n\n\ndef digest(t):\n    return hashlib.sha256(t.encode()).hexdigest()\n",
+   "src/util/dates.py": "# Copyright 2025 Acme Corp\n# Valid since 2025-01-01.\n\n\ndef iso(y, m, d):\n    return \"%04d-%02d-%02d\" % (y, m, d)\n",
+   "src/util/text.py": "# Copyright 2025 Acme Corp\n\n\ndef shout(s):\n    return s.upper()\n",
+   "src/api.py": "# Copyright 2025 Acme Corp\nRELEASE = \"2025.2\"  # first shipped 2025\n",
+   "vendor/libx.py": "# Copyright 2025 Third Party\nX = 1\n",
+   "vendor/liby.py": "# Copyright 2025 Third Party\n# fork of the 2025 release\nY = 2\n"
+  },
+  "hidden": {
+   "_hidden_check.py": "expected = {\"src/billing.py\": 2, \"src/auth.py\": 0, \"src/util/dates.py\": 1, \"src/util/text.py\": 0, \"src/api.py\": 2, \"vendor/libx.py\": 0, \"vendor/liby.py\": 1}\nfor path, n in expected.items():\n    lines = open(path).read().split(\"\\n\")\n    want = \"# Copyright 2026 Acme Corp\" if path.startswith(\"src/\") else \"# Copyright 2025 Third Party\"\n    assert lines[0] == want, (path, lines[0])\n    assert sum(l.count(\"2025\") for l in lines[1:]) == n, (path, \"other mentions of 2025 changed\")\nprint(\"hidden ok\")\n"
+  }
+ }
+]

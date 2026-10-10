@@ -758,14 +758,34 @@ struct NaluriHeadroomTests {
 
 @Suite("agent eval support")
 struct AgentEvalTests {
-    @Test("every shipped case is sound: check fails on the seed, passes after the reference solution")
-    func shippedCasesValidate() async throws {
+    @Test("every shipped case is sound: check fails on the seed, passes after the reference solution",
+          arguments: ["Evals/agent.json", "Evals/agent-hard.json"])
+    func shippedCasesValidate(file: String) async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let cases = try AgentEvalCase.load(path: root.appendingPathComponent("Evals/agent.json").path)
+        let cases = try AgentEvalCase.load(path: root.appendingPathComponent(file).path)
         #expect(cases.count >= 10)
         let problems = await AgentEval.validate(cases: cases)
         #expect(problems.isEmpty, "\(problems)")
+    }
+
+    @Test("hidden files are applied at check time; transcript stats count tools and compactions")
+    func hiddenAndTranscript() async throws {
+        let strict = AgentEvalCase(id: "h", group: "g", task: "t", files: nil, check: "test -f _h.txt && test -f done.txt",
+                                   solution: "touch done.txt", hidden: ["_h.txt": "x"])
+        #expect(await AgentEval.validate(cases: [strict]).isEmpty)
+        let path = NSTemporaryDirectory() + "transcript-\(UUID().uuidString).jsonl"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let lines = [
+            #"{"kind":"append","message":{"role":"assistant","tool_calls":[{"id":"1","type":"function","function":{"name":"bash","arguments":"{}"}},{"id":"2","type":"function","function":{"name":"spawn_agent","arguments":"{}"}}]}}"#,
+            #"{"kind":"append","message":{"role":"tool","content":"x"}}"#,
+            #"{"kind":"replace","messages":[]}"#,
+            #"{"kind":"append","message":{"role":"assistant","tool_calls":[{"id":"3","type":"function","function":{"name":"bash","arguments":"{}"}}]}}"#,
+        ]
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        let stats = AgentEvalSupport.transcriptStats(sessionLogPath: path)
+        #expect(stats.toolCounts == ["bash": 2, "spawn_agent": 1] && stats.compactions == 1)
+        #expect(AgentEvalSupport.toolCallCount(sessionLogPath: path) == 3)
     }
 
     @Test("validation catches a vacuous check and an unsatisfiable one")

@@ -257,6 +257,16 @@ be reached from tests only via `@testable import`.
   case's reference solution, and runs under `swift test`. `HARNESS_USAGE_LOG=path`
   (or `usageLog` in the config) makes any run append one JSON line per model
   turn — sub-agents included — which is what the eval reads.
+  `Evals/agent.json` is the easy set (a regression tripwire: expect 100%).
+  `--eval-cases Evals/agent-hard.json` is the discriminating set (10 cases):
+  hidden stricter checks the agent never sees (so a minimal or hardcoded fix
+  fails), a misleading `KeyError` whose real bug is two modules away, a
+  30-file search with look-alike constants, following a project's command
+  convention, a calculator with three bugs, a circular import, a refactor with
+  a structural constraint, a "change exactly the right 2025s" precision case,
+  a `spawn_agent` case (fails unless the tool was actually called), and a
+  compaction case (`HARNESS_COMPACT_BYTES` forced low; the report says how many
+  runs actually compacted).
 - **Sub-agents (orchestration).** A `spawn_agent` tool: the model delegates a
   self-contained subtask to a fresh agent (same provider and tools, empty
   conversation, same cwd) and gets back only the final report — bulk work
