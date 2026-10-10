@@ -71,6 +71,12 @@ public struct AgentEvalRun: Codable, Sendable {
     /// Kept (not deleted) for failed runs: workdir + transcript for debugging.
     public var artifactDir: String?
     public var checkOutput: String?
+    /// Tail of what the harness printed, kept IN the result (not on disk next to
+    /// the agent) for failed runs, so the evidence survives an agent that wipes
+    /// its working tree.
+    public var harnessOutputTail: String?
+    /// The agent left none of the seed files in place (it wiped its work dir).
+    public var workDirWiped: Bool?
 }
 
 public enum AgentEvalSupport {
@@ -260,7 +266,10 @@ public enum AgentEval {
             }
         }
         // Passes leave nothing behind; failures keep their dirs for debugging.
-        if !results.contains(where: { $0.artifactDir != nil }) { try? FileManager.default.removeItem(atPath: scratch) }
+        if !results.contains(where: { $0.artifactDir != nil }) {
+            try? FileManager.default.removeItem(atPath: scratch)
+            try? FileManager.default.removeItem(atPath: scratch + "-meta")
+        }
         results.sort { ($0.caseID, $0.run) < ($1.caseID, $1.run) }
         return AgentEvalReport(
             date: ISO8601DateFormatter().string(from: Date()), provider: provider, model: model,
@@ -275,7 +284,10 @@ public enum AgentEval {
     ) async -> AgentEvalRun {
         let root = "\(scratch)/\(testCase.id)-\(runNumber)"
         let work = root + "/work"
-        let meta = root + "/meta"
+        // Bookkeeping lives in a SIBLING tree, not under `root`: an agent that
+        // runs `rm -rf ..` from its work dir must not take the usage log and
+        // transcript with it (a DeepSeek run did exactly that to the work dir).
+        let meta = "\(scratch)-meta/\(testCase.id)-\(runNumber)"
         var result = AgentEvalRun(
             caseID: testCase.id, group: testCase.group, run: runNumber, passed: false, harnessExit: -1,
             timedOut: false, turns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, wallMs: 0,
@@ -313,20 +325,26 @@ public enum AgentEval {
         result.compactions = stats.compactions
         result.costUSD = AgentEvalPricing.cost(provider: provider, input: totals.prompt, output: totals.completion)
 
+        let seeds = Array((testCase.files ?? [:]).keys)
+        let survivors = seeds.filter { FileManager.default.fileExists(atPath: work + "/" + $0) }.count
+        if seeds.count >= 2, survivors == 0 { result.workDirWiped = true }
         try? AgentEvalSupport.writeFiles(testCase.hidden, in: work)
         let check = await ShellRunner.run(command: testCase.check, cwd: work, timeout: 60)
         let checkPassed = AgentEvalSupport.exitCode(of: check) == 0
         let toolMissing = testCase.requiresTool.map { (stats.toolCounts[$0] ?? 0) == 0 } ?? false
         result.passed = checkPassed && !toolMissing
         if !result.passed {
+            result.harnessOutputTail = String(report.suffix(3000))
             let harnessError = totals.turns == 0 ? AgentEvalSupport.errorLine(in: report) : nil
             result.checkOutput = harnessError ?? (checkPassed
                 ? "check passed but required tool '\(testCase.requiresTool ?? "")' was never called"
                 : String(check.prefix(400)))
             result.artifactDir = root
+            try? FileManager.default.createDirectory(atPath: meta, withIntermediateDirectories: true)
             try? report.write(toFile: meta + "/stdout.txt", atomically: true, encoding: .utf8)
         } else {
             try? FileManager.default.removeItem(atPath: root)
+            try? FileManager.default.removeItem(atPath: meta)
         }
         return result
     }
@@ -374,6 +392,10 @@ public enum AgentEval {
         }
         let compacted = report.runs.filter { ($0.compactions ?? 0) > 0 }.count
         if compacted > 0 { lines.append("runs where compaction fired: \(compacted)/\(total)") }
+        let wiped = report.runs.filter { $0.workDirWiped == true }.count
+        if wiped > 0 {
+            lines.append("⚠ \(wiped) run(s) WIPED their own working tree (no seed file left) — the agent ran something destructive; see harnessOutputTail in the results file")
+        }
         let timeouts = report.runs.filter(\.timedOut).count
         let capped = report.runs.filter { !$0.passed && $0.harnessExit != 0 && !$0.timedOut }.count
         lines.append("failed runs that timed out: \(timeouts); ended with a harness error/turn cap: \(capped)"

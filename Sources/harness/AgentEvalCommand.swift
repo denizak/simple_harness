@@ -74,7 +74,10 @@ enum AgentEvalCommand {
             print(AgentUI.warn("check the provider key/endpoint (an exported <PROVIDER>_API_KEY beats keys in config files)."))
         }
         for run in report.runs where run.artifactDir != nil {
-            print(AgentUI.dim("  kept for debugging: \(run.artifactDir ?? "")  (\(run.caseID) #\(run.run))"))
+            let root = URL(fileURLWithPath: run.artifactDir ?? "")
+            let logs = root.deletingLastPathComponent().path + "-meta/" + root.lastPathComponent
+            print(AgentUI.dim("  kept for debugging: \(root.path)  (\(run.caseID) #\(run.run))"))
+            print(AgentUI.dim("    logs: \(logs)"))
         }
 
         let dir = "Evals/results"
