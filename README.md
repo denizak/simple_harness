@@ -214,6 +214,15 @@ be reached from tests only via `@testable import`.
     provider returns no logprobs the answer is a one-hot pick, marked
     `[uncalibrated]`. The gate threshold means different things per model —
     re-tune `--gate-threshold` when switching backend.
+- **Naluri eval.** `harness --eval-naluri [typesafe,deepseek,zai]` runs the
+  labelled cases in `Evals/naluri.json` (urgency, gate safety, routing,
+  severity) against each backend and prints accuracy, Brier score,
+  overconfidence, latency and estimated cost; per-case results go to
+  `Evals/results/` (git-ignored). It is **live** (real quota), so it is never
+  part of `swift test`. Spend is capped: `--eval-budget USD` (default 1.00)
+  stops issuing calls once the *estimated* cost — token usage × assumed prices
+  in `NaluriEvalPricing`, not billing data — reaches the cap. `--eval-limit N`
+  gives a cheap smoke run. Backends without credentials are skipped.
 - **Sub-agents (orchestration).** A `spawn_agent` tool: the model delegates a
   self-contained subtask to a fresh agent (same provider and tools, empty
   conversation, same cwd) and gets back only the final report — bulk work

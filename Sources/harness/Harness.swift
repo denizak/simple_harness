@@ -68,6 +68,10 @@ struct HarnessMain {
             await E2ETest.run()
             return
         }
+        if arguments.contains("--eval-naluri") {
+            await EvalCommand.run(arguments: arguments)
+            return
+        }
         if arguments.contains("--selftest") {
             await SelfTest.run()
             return
@@ -99,6 +103,9 @@ struct HarnessMain {
                   --naluri-model ID    chat model for deepseek/zai naluri (default: flash tier)
                   --once TASK       run one task non-interactively (nonzero exit on failure)
                   --reasoning EFF   reasoning effort for thinking models (none|low|medium|high|max)
+                  --eval-naluri [BACKENDS]  LIVE: compare naluri backends on Evals/naluri.json
+                                    (typesafe,deepseek,zai; --eval-budget USD default 1,
+                                    --eval-limit N, --eval-cases PATH)
                   --selftest        exercise the tool layer without any API call
                   --e2e             stub-model loop tests + a live round-trip
                   --version         print the version and exit

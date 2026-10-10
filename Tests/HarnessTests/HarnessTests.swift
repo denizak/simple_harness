@@ -647,3 +647,69 @@ struct ChatNaluriTests {
         #expect((config.naluriBackend as? ChatNaluri)?.model == "glm-4.5-flash")
     }
 }
+
+@Suite("naluri eval scoring")
+struct NaluriEvalTests {
+    private func answer(_ id: String, _ body: [String: JSONValue]) -> JSONValue {
+        .object(["answers": .object([id: .object(body)]),
+                 "usage": .object(["input_tokens": .number(100), "output_tokens": .number(2)])])
+    }
+
+    @Test("shipped case file decodes, ids unique, expectations valid")
+    func caseFile() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let cases = try NaluriEvalCase.load(path: root.appendingPathComponent("Evals/naluri.json").path)
+        #expect(cases.count >= 30)
+        #expect(Set(cases.map(\.id)).count == cases.count)
+        for testCase in cases {
+            switch testCase.type {
+            case "noul": #expect(["yes", "no"].contains(testCase.expected), "\(testCase.id)")
+            case "choice": #expect(testCase.criteria?.objectValue?[testCase.expected] != nil, "\(testCase.id)")
+            case "score":
+                let levels = testCase.criteria?.arrayValue?.count ?? 0
+                #expect((Int(testCase.expected) ?? -1) < levels, "\(testCase.id)")
+            default: Issue.record("unknown type in \(testCase.id)")
+            }
+        }
+    }
+
+    @Test("noul: accuracy, confidence and Brier")
+    func noul() {
+        let testCase = NaluriEvalCase(id: "q", group: "g", state: "s", type: "noul",
+                                      instructions: "?", criteria: nil, expected: "yes")
+        let right = NaluriEvalScoring.grade(testCase, root: answer("q", ["type": .string("noul"), "noul": .number(0.9)]))
+        #expect(right.correct && right.predicted == "yes" && right.inputTokens == 100)
+        #expect(abs((right.brier ?? 9) - 0.02) < 1e-9)
+        let wrong = NaluriEvalScoring.grade(testCase, root: answer("q", ["type": .string("noul"), "noul": .number(0.2)]))
+        #expect(!wrong.correct && wrong.predicted == "no" && abs((wrong.confidence ?? 0) - 0.8) < 1e-9)
+    }
+
+    @Test("score: legend numbering (0- or 1-based) is respected")
+    func scoreBase() {
+        let testCase = NaluriEvalCase(id: "q", group: "g", state: "s", type: "score", instructions: "?",
+                                      criteria: .array([.string("a"), .string("b"), .string("c")]), expected: "2")
+        let oneBased: [String: JSONValue] = [
+            "type": .string("score"), "score": .number(3.1), "confidence": .number(0.7),
+            "legend": .object(["1": .string("a"), "2": .string("b"), "3": .string("c")])]
+        #expect(NaluriEvalScoring.grade(testCase, root: answer("q", oneBased)).correct)
+        let zeroBased: [String: JSONValue] = [
+            "type": .string("score"), "score": .number(1.2),
+            "legend": .object(["0": .string("a"), "1": .string("b"), "2": .string("c")])]
+        let graded = NaluriEvalScoring.grade(testCase, root: answer("q", zeroBased))
+        #expect(!graded.correct && graded.withinOne == true)
+    }
+
+    @Test("summary aggregates; skipped cases are not graded; cost uses assumed prices")
+    func summary() {
+        let testCase = NaluriEvalCase(id: "q", group: "g", state: "s", type: "noul",
+                                      instructions: "?", criteria: nil, expected: "yes")
+        let good = NaluriEvalScoring.grade(testCase, root: answer("q", ["type": .string("noul"), "noul": .number(0.9)]))
+        var skipped = NaluriEvalScoring.grade(testCase, root: .null)
+        skipped.skipped = true
+        let summary = NaluriEvalSummary.summarize(backend: "b", model: "m", results: [good, skipped], costUSD: 0)
+        #expect(summary.graded == 1 && summary.skipped == 1 && summary.accuracy == 1)
+        let cost = NaluriEvalPricing.cost(backend: "deepseek", input: 1_000_000, output: 0)
+        #expect(abs(cost - 0.30) < 1e-9)
+    }
+}

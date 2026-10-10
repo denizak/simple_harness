@@ -357,3 +357,25 @@ probabilities, as the counterpart to the deliberate chat loop.
 - **Unverified:** the live DeepSeek/GLM calls — whether each returns
   `top_logprobs` and accepts `thinking: {type: disabled}` — and the `glm-4.5-flash`
   model id. A live e2e leg for the chat backend is not yet written.
+
+## T9 — naluri eval (implemented)
+
+First slice of the eval roadmap: compare naluri backends on 40 drafted, labelled
+cases (`Evals/naluri.json`: 12 urgency, 10 gate-safety, 10 routing, 8 severity).
+`NaluriEval.swift` (library: case model, pure scoring, runner, table) +
+`EvalCommand.swift` (`--eval-naluri` CLI). Metrics: accuracy (overall and per
+group), Brier score, overconfidence (mean confidence − accuracy), confidence
+when wrong, uncalibrated count, latency, tokens, estimated cost. Score cases map
+the backend's legend numbering (0- or 1-based) onto the 0-based expectation.
+Spend cap `--eval-budget` (default $1) on *estimated* cost with assumed,
+conservative prices. Offline tests cover the case file's validity and the
+scoring; the live run itself has not been executed yet.
+
+**Caveats:** the 40 cases are synthetic and drafted by the assistant — at this size
+a difference under ~15 points between backends is noise; replace or extend them
+with real prompts (especially the gate-safety group). The gate threshold needs
+tuning per backend from these results.
+
+**Next (not built):** the agent eval — a subprocess runner (`harness --once` per
+case in a temp dir, check by command) needs one core change: persist token usage
+(the loop currently only prints it, and sub-agent usage is dropped).

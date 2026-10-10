@@ -6,3 +6,6 @@
 *.linkfile
 build/.simple.h.conf
 .simple.h.conf
+
+# eval run output
+Evals/results/
