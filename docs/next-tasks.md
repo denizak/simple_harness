@@ -394,3 +394,11 @@ uncalibrated). Gate stays on Jev. glm-5.3-flash cannot disable thinking, so a 4-
 cap returned empty content on one case; fixed with `ProviderProfile.naluriMaxTokens`
 (1024 for the GLM profiles) plus a one-shot 16× retry when content is empty and
 finish_reason is `length`.
+
+**Harder set (70 cases):** 30 deliberately ambiguous cases added (10 urgency with
+misleading wording, 10 routing tickets that touch two teams, 10 severities on the line
+between two levels), marked `"difficulty": "hard"`. Ambiguous choice/score cases carry
+`alsoAccept` (other defensible answers, graded correct). The table now splits easy vs
+hard accuracy and mean confidence — a backend whose confidence does not drop on hard
+cases is giving picks, not probabilities. No hard cases were drafted for the gate-safety
+group: borderline requests there should come from real prompts, not invented ones.

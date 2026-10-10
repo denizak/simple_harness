@@ -26,6 +26,17 @@ public struct NaluriEvalCase: Codable, Sendable {
     public var criteria: JSONValue?
     /// noul: "yes"/"no" · choice: option name · score: 0-based level index
     public var expected: String
+    /// "hard" marks a deliberately ambiguous case (default: easy). A good
+    /// backend should be LESS confident on these — that gap is the signal.
+    public var difficulty: String?
+    /// Other defensible answers, also graded correct (ambiguous cases only).
+    public var alsoAccept: [String]?
+
+    public var isHard: Bool { difficulty == "hard" }
+
+    func accepts(_ answer: String) -> Bool {
+        answer == expected || (alsoAccept?.contains(answer) ?? false)
+    }
 
     public var question: NaluriQuestion {
         NaluriQuestion(id: id, type: type, instructions: instructions, criteria: criteria)
@@ -40,6 +51,7 @@ public struct NaluriEvalCase: Codable, Sendable {
 public struct NaluriEvalResult: Codable, Sendable {
     public var caseID: String
     public var group: String
+    public var hard: Bool
     public var predicted: String?
     public var expected: String
     public var correct: Bool
@@ -61,7 +73,7 @@ public enum NaluriEvalScoring {
     /// Pure: grade one backend answer (the shared answer shape) against a case.
     public static func grade(_ testCase: NaluriEvalCase, root: JSONValue) -> NaluriEvalResult {
         var result = NaluriEvalResult(
-            caseID: testCase.id, group: testCase.group, predicted: nil, expected: testCase.expected,
+            caseID: testCase.id, group: testCase.group, hard: testCase.isHard, predicted: nil, expected: testCase.expected,
             correct: false, confidence: nil, brier: nil, withinOne: nil, uncalibrated: false,
             latencyMs: 0, inputTokens: 0, outputTokens: 0, error: nil, skipped: false)
         let usage = root.objectValue?["usage"]?.objectValue
@@ -86,7 +98,7 @@ public enum NaluriEvalScoring {
         guard let pYes = answer["noul"]?.doubleValue else { result.error = "no noul value"; return }
         let predictedYes = pYes >= 0.5
         result.predicted = predictedYes ? "yes" : "no"
-        result.correct = result.predicted == testCase.expected
+        result.correct = testCase.accepts(predictedYes ? "yes" : "no")
         result.confidence = max(pYes, 1 - pYes)
         let yesTruth = testCase.expected == "yes" ? 1.0 : 0.0
         result.brier = pow(pYes - yesTruth, 2) + pow((1 - pYes) - (1 - yesTruth), 2)
@@ -96,7 +108,7 @@ public enum NaluriEvalScoring {
                                     into result: inout NaluriEvalResult) {
         guard let picked = answer["choice"]?.stringValue else { result.error = "no choice value"; return }
         result.predicted = picked
-        result.correct = picked == testCase.expected
+        result.correct = testCase.accepts(picked)
         let probabilities = answer["probabilities"]?.objectValue?.compactMapValues { $0.doubleValue } ?? [:]
         result.confidence = probabilities[picked] ?? answer["confidence"]?.doubleValue
         let options = testCase.criteria?.objectValue?.keys.sorted() ?? []
@@ -117,7 +129,7 @@ public enum NaluriEvalScoring {
         let offset = keys.first ?? 0
         let predictedIndex = Int(score.rounded()) - offset
         result.predicted = String(predictedIndex)
-        result.correct = predictedIndex == expectedIndex
+        result.correct = testCase.accepts(String(predictedIndex))
         result.withinOne = abs(predictedIndex - expectedIndex) <= 1
         result.confidence = answer["confidence"]?.doubleValue
     }
@@ -142,6 +154,12 @@ public struct NaluriEvalSummary: Codable, Sendable {
     public var outputTokens: Int
     public var estimatedCostUSD: Double
     public var accuracyByGroup: [String: Double]
+    /// Easy vs hard (ambiguous) cases: accuracy and mean confidence. A backend
+    /// whose confidence does not drop on hard cases is not telling you anything.
+    public var easyAccuracy: Double?
+    public var hardAccuracy: Double?
+    public var easyMeanConfidence: Double?
+    public var hardMeanConfidence: Double?
 
     public static func summarize(backend: String, model: String, results: [NaluriEvalResult],
                                  costUSD: Double) -> NaluriEvalSummary {
@@ -156,6 +174,11 @@ public struct NaluriEvalSummary: Codable, Sendable {
             let inGroup = graded.filter { $0.group == group }
             groups[group] = Double(inGroup.filter(\.correct).count) / Double(inGroup.count)
         }
+        func share(_ subset: [NaluriEvalResult]) -> Double? {
+            subset.isEmpty ? nil : Double(subset.filter(\.correct).count) / Double(subset.count)
+        }
+        let easy = graded.filter { !$0.hard }
+        let hard = graded.filter(\.hard)
         return NaluriEvalSummary(
             backend: backend, model: model, graded: graded.count, correct: correct,
             errors: ran.count - graded.count, skipped: results.count - ran.count, accuracy: accuracy,
@@ -166,7 +189,10 @@ public struct NaluriEvalSummary: Codable, Sendable {
             meanLatencyMs: ran.isEmpty ? 0 : ran.map(\.latencyMs).reduce(0, +) / ran.count,
             inputTokens: ran.map(\.inputTokens).reduce(0, +),
             outputTokens: ran.map(\.outputTokens).reduce(0, +),
-            estimatedCostUSD: costUSD, accuracyByGroup: groups)
+            estimatedCostUSD: costUSD, accuracyByGroup: groups,
+            easyAccuracy: share(easy), hardAccuracy: share(hard),
+            easyMeanConfidence: mean(easy.compactMap(\.confidence)),
+            hardMeanConfidence: mean(hard.compactMap(\.confidence)))
     }
 }
 
@@ -277,6 +303,10 @@ public enum NaluriEval {
                 .map { "\($0.key) \(pct($0.value))" }.joined(separator: ", ")
             lines.append("            by group: \(groups)"
                 + (s.skipped > 0 ? "  [\(s.skipped) skipped: budget]" : ""))
+            if s.hardAccuracy != nil {
+                lines.append("            easy: acc \(pct(s.easyAccuracy)), conf \(num(s.easyMeanConfidence, 2))"
+                    + "  |  hard: acc \(pct(s.hardAccuracy)), conf \(num(s.hardMeanConfidence, 2))")
+            }
         }
         lines.append(String(format: "total est. cost $%.4f of $%.2f cap (prices are assumed, not billed)",
                             report.totalCostUSD, report.budgetUSD))

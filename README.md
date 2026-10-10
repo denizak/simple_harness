@@ -226,8 +226,9 @@ be reached from tests only via `@testable import`.
   the gate is effectively yes/no.
 - **Naluri eval.** `harness --eval-naluri [typesafe,deepseek,zai-coding]` runs the
   labelled cases in `Evals/naluri.json` (urgency, gate safety, routing,
-  severity) against each backend and prints accuracy, Brier score,
-  overconfidence, latency and estimated cost; per-case results go to
+  severity — 40 easy plus 30 deliberately ambiguous `hard` ones) against each backend and prints accuracy, Brier score,
+  overconfidence, easy-vs-hard accuracy and confidence, latency and
+  estimated cost; per-case results go to
   `Evals/results/` (git-ignored). It is **live** (real quota), so it is never
   part of `swift test`. Spend is capped: `--eval-budget USD` (default 1.00)
   stops issuing calls once the *estimated* cost — token usage × assumed prices

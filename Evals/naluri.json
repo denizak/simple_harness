@@ -475,7 +475,11 @@
    "Major: significant feature unavailable for many users",
    "Critical: outage, data loss or security breach"
   ],
-  "expected": "1"
+  "expected": "1",
+  "difficulty": "hard",
+  "alsoAccept": [
+   "2"
+  ]
  },
  {
   "id": "severity-07",
@@ -504,5 +508,485 @@
    "Critical: outage, data loss or security breach"
   ],
   "expected": "2"
+ },
+ {
+  "id": "urgent-h01",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "URGENT!!! Please fill in the team lunch poll, it closes at the end of the month.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "no"
+ },
+ {
+  "id": "urgent-h02",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "No rush at all, but FYI the TLS certificate for our public API expires in 40 minutes.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "yes"
+ },
+ {
+  "id": "urgent-h03",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "Quick question, not urgent: is it expected that staging and production share a database password? Asking because the staging one was just posted in the public channel.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "yes"
+ },
+ {
+  "id": "urgent-h04",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "CRITICAL: the office coffee machine is out of beans again.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "no"
+ },
+ {
+  "id": "urgent-h05",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "Our largest customer's renewal is due next quarter; they mentioned some frustration with response times.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "no"
+ },
+ {
+  "id": "urgent-h06",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "Odd thing: the on-call pager has been quiet all day. Monitoring shows the alerting service itself has been down since this morning.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "yes"
+ },
+ {
+  "id": "urgent-h07",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "ASAP please: I need your t-shirt size for the offsite order. The form closes in three weeks.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "no"
+ },
+ {
+  "id": "urgent-h08",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "Small thing I noticed: the 'delete account' button now deletes the whole organisation. It shipped ten minutes ago.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "yes"
+ },
+ {
+  "id": "urgent-h09",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "Reminder: the fire drill is tomorrow at 14:00. Emergency exits will be tested.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "no"
+ },
+ {
+  "id": "urgent-h10",
+  "group": "urgency",
+  "difficulty": "hard",
+  "state": "Funny one: the checkout total shows $0.00 for every cart right now.",
+  "type": "noul",
+  "instructions": "Is this message urgent — does it need a human response within the hour?",
+  "criteria": {
+   "true": "Time-sensitive; delay causes real harm or loss",
+   "false": "Can wait; routine or informational"
+  },
+  "expected": "yes"
+ },
+ {
+  "id": "route-h01",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "I was charged for the Pro plan but my account still only has the Free features.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "billing",
+  "alsoAccept": [
+   "tech"
+  ]
+ },
+ {
+  "id": "route-h02",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "I can't log in, and I need to download last month's invoice today.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "account",
+  "alsoAccept": [
+   "billing"
+  ]
+ },
+ {
+  "id": "route-h03",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "The payment page crashes with a script error when I click Pay.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "tech",
+  "alsoAccept": [
+   "billing"
+  ]
+ },
+ {
+  "id": "route-h04",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "I changed my email address last week, but receipts still go to the old one.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "account",
+  "alsoAccept": [
+   "billing"
+  ]
+ },
+ {
+  "id": "route-h05",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "My card was charged, but the app says the payment failed.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "billing",
+  "alsoAccept": [
+   "tech"
+  ]
+ },
+ {
+  "id": "route-h06",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "Two-factor codes stopped arriving by SMS yesterday; everyone on my team has the same problem.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "tech",
+  "alsoAccept": [
+   "account"
+  ]
+ },
+ {
+  "id": "route-h07",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "I want to transfer ownership of our workspace to a colleague before I cancel my own subscription.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "account",
+  "alsoAccept": [
+   "billing"
+  ]
+ },
+ {
+  "id": "route-h08",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "The refund shows as processed, but the page that lists it now returns a 404.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "tech",
+  "alsoAccept": [
+   "billing"
+  ]
+ },
+ {
+  "id": "route-h09",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "Our admin left the company and nobody else can open the billing settings.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "account",
+  "alsoAccept": [
+   "billing"
+  ]
+ },
+ {
+  "id": "route-h10",
+  "group": "routing",
+  "difficulty": "hard",
+  "state": "The usage dashboard shows three times more API calls than our own logs, and we were billed on the dashboard number.",
+  "type": "choice",
+  "instructions": "Which team should handle this support ticket?",
+  "criteria": {
+   "billing": "Charges, invoices, refunds, payment methods",
+   "tech": "Bugs, errors, outages, performance",
+   "account": "Login, password, profile, permissions, deleting an account"
+  },
+  "expected": "billing",
+  "alsoAccept": [
+   "tech"
+  ]
+ },
+ {
+  "id": "severity-h01",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Password reset emails are delayed by about 15 minutes for all users.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "1",
+  "alsoAccept": [
+   "2"
+  ]
+ },
+ {
+  "id": "severity-h02",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "The company logo is missing from the login page for every customer.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "0",
+  "alsoAccept": [
+   "1"
+  ]
+ },
+ {
+  "id": "severity-h03",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Reports generated in the last hour show another tenant's company name in the header, but none of their data.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "3",
+  "alsoAccept": [
+   "2"
+  ]
+ },
+ {
+  "id": "severity-h04",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "The mobile app is unusable on one old Android version used by under 1% of customers; the web app works.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "1",
+  "alsoAccept": [
+   "2"
+  ]
+ },
+ {
+  "id": "severity-h05",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Scheduled exports silently stopped running two days ago for everyone; manual export still works.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "2",
+  "alsoAccept": [
+   "1"
+  ]
+ },
+ {
+  "id": "severity-h06",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "The admin audit log has not recorded any events for a week.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "2",
+  "alsoAccept": [
+   "3"
+  ]
+ },
+ {
+  "id": "severity-h07",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Checkout works, but takes 25 seconds for every customer.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "2",
+  "alsoAccept": [
+   "3"
+  ]
+ },
+ {
+  "id": "severity-h08",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Dates are displayed in US format for European users.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "0",
+  "alsoAccept": [
+   "1"
+  ]
+ },
+ {
+  "id": "severity-h09",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Roughly 5% of uploaded files are stored corrupted and cannot be recovered.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "3",
+  "alsoAccept": [
+   "2"
+  ]
+ },
+ {
+  "id": "severity-h10",
+  "group": "severity",
+  "difficulty": "hard",
+  "state": "Notifications are sent twice to about a third of users.",
+  "type": "score",
+  "instructions": "How severe is this incident?",
+  "criteria": [
+   "Cosmetic: no functional impact",
+   "Minor: degraded for a few users, workaround exists",
+   "Major: significant feature unavailable for many users",
+   "Critical: outage, data loss or security breach"
+  ],
+  "expected": "1",
+  "alsoAccept": [
+   "2"
+  ]
  }
 ]

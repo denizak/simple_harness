@@ -671,7 +671,30 @@ struct NaluriEvalTests {
                 #expect((Int(testCase.expected) ?? -1) < levels, "\(testCase.id)")
             default: Issue.record("unknown type in \(testCase.id)")
             }
+            // A yes/no case has no second defensible answer.
+            if testCase.type == "noul" { #expect(testCase.alsoAccept == nil, "\(testCase.id)") }
         }
+        #expect(cases.filter(\.isHard).count >= 25)
+    }
+
+    @Test("ambiguous cases: alsoAccept is graded correct; easy/hard are summarised apart")
+    func hardCases() {
+        var testCase = NaluriEvalCase(id: "q", group: "g", state: "s", type: "choice", instructions: "?",
+                                      criteria: .object(["a": .string(""), "b": .string(""), "c": .string("")]),
+                                      expected: "a")
+        testCase.difficulty = "hard"
+        testCase.alsoAccept = ["b"]
+        func picked(_ option: String, _ p: Double) -> NaluriEvalResult {
+            NaluriEvalScoring.grade(testCase, root: answer("q", [
+                "type": .string("choice"), "choice": .string(option),
+                "probabilities": .object([option: .number(p)])]))
+        }
+        #expect(picked("b", 0.6).correct && picked("b", 0.6).hard)
+        #expect(!picked("c", 0.6).correct)
+        let summary = NaluriEvalSummary.summarize(
+            backend: "x", model: "m", results: [picked("a", 0.6), picked("c", 0.8)], costUSD: 0)
+        #expect(summary.hardAccuracy == 0.5 && summary.easyAccuracy == nil)
+        #expect(abs((summary.hardMeanConfidence ?? 0) - 0.7) < 1e-9)
     }
 
     @Test("noul: accuracy, confidence and Brier")
