@@ -206,15 +206,25 @@ be reached from tests only via `@testable import`.
   - **TypeSafe (Jev)** — the default when `TYPESAFE_API_KEY` is set; calibrated
     probabilities from a purpose-built model.
   - **Chat model** (`ChatNaluri`) — a cheap flash-tier model via
-    `HARNESS_NALURI=deepseek|zai` (or `--naluri`, or `"naluri"` in the config
-    file) and that provider's key. Each question is one tiny request limited to
-    a single answer token; the probability comes from the server's `logprobs`
-    normalised over the allowed tokens. Default models: `deepseek-flash`,
-    `glm-5.3-flash` (override: `HARNESS_NALURI_MODEL` / `--naluri-model`). If a
-    provider returns no logprobs the answer is a one-hot pick, marked
-    `[uncalibrated]`. The gate threshold means different things per model —
-    re-tune `--gate-threshold` when switching backend.
-- **Naluri eval.** `harness --eval-naluri [typesafe,deepseek,zai]` runs the
+    `HARNESS_NALURI=deepseek|zai|zai-coding` (or `--naluri`, or `"naluri"` in
+    the config file) and that provider's key (its own env key wins over the
+    active config's `apiKey`). Each question is one tiny request limited to a
+    single answer token; the probability comes from the server's `logprobs`
+    normalised over the allowed tokens. The model and token budget are catalog
+    data (`naluriModel`, `naluriMaxTokens` on the provider profile); override
+    the model with `HARNESS_NALURI_MODEL` / `--naluri-model`.
+
+  What the first live eval showed (40 easy cases — see `docs/next-tasks.md`):
+
+  | Backend | Probabilities | Latency | Use it for |
+  |---|---|---|---|
+  | TypeSafe (Jev) | graded (0.64–0.99) | ~270 ms | the gate, anything thresholded |
+  | `deepseek-flash` | real logprobs, but saturated at ≥ 0.99 | ~820 ms | cheap picks |
+  | `glm-5.3-flash` | none — z.ai has no logprobs; answers are one-hot, marked `[uncalibrated]` | ~2 s (thinking cannot be disabled) | cheap picks |
+
+  So a `--gate-threshold` only means something on Jev; on the chat backends
+  the gate is effectively yes/no.
+- **Naluri eval.** `harness --eval-naluri [typesafe,deepseek,zai-coding]` runs the
   labelled cases in `Evals/naluri.json` (urgency, gate safety, routing,
   severity) against each backend and prints accuracy, Brier score,
   overconfidence, latency and estimated cost; per-case results go to

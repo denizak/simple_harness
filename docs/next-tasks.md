@@ -2,7 +2,7 @@
 
 Originally planned against baseline `c96ad42`. T1–T5 were implemented in order in that worktree; T6 was planned against `4d7ba3a` and is now implemented (`a566d93`). This document is a historical record — current status lives in "Completion status" below.
 
-**Status: T1–T8 all implemented and merged to `main`.** The roadmap items from README
+**Status: T1–T9 all implemented on `main`.** The roadmap items from README
 "Where to go next" are complete; the one remaining named follow-up is the per-tool
 approval allowlist (T6's deferred refinement).
 
@@ -234,8 +234,8 @@ auto-approver (a natural follow-up: classifier *suggests*, human decides).
 T1–T6 all implemented with offline tests, plus post-T6 hardening (`@`-file completion:
 `e27aeef`, `4cce27e`, `b7d7bc0`; ShellRunner pipe-drain/EINTR: `13f63bc`, `f004251`),
 T6.5 (JSONL session log, `e666889`), T7 (Anthropic-native client, `371322a`), and T7a
-(OpenRouter provider profile, `ec13406`), and T8 (naluri, `73dc73c`). Latest macOS verification (at `371322a`):
-`swift test` passed (80 tests), `swift run harness --selftest` passed, `swift build -c
+(OpenRouter provider profile, `ec13406`), T8 (naluri, `73dc73c`) and T9 (naluri eval, `4bcdadf`). Latest macOS verification:
+`swift test` passed (90 tests), `swift run harness --selftest` passed, `swift build -c
 release` passed, `git diff --check` clean. History through `ec13406` is pushed to
 `origin/main`. Linux CI has not yet been confirmed against recent commits.
 
@@ -354,9 +354,15 @@ probabilities, as the counterpart to the deliberate chat loop.
   (`TYPESAFE_API_KEY`, `typesafeApiKey`) are unchanged.
 - **Tests:** ChatNaluriTests (distribution, prompts, answer shape, backend
   selection); pure, no network.
-- **Unverified:** the live DeepSeek/GLM calls — whether each returns
-  `top_logprobs` and accepts `thinking: {type: disabled}` — and the `glm-5.3-flash`
-  model id. A live e2e leg for the chat backend is not yet written.
+- **Verified live (via T9):** DeepSeek returns `top_logprobs` and works as
+  designed. z.ai's API has no logprobs at all, so GLM answers are always the
+  one-hot `uncalibrated` fallback; `glm-5.3-flash` also cannot disable
+  thinking. The pay-as-you-go `zai` endpoint had no balance for it (HTTP 429,
+  code 1113); the coding-plan profile `zai-coding` works.
+- **Follow-up fixes:** provider env key wins over the active config's `apiKey`;
+  per-provider `naluriModel` / `naluriMaxTokens` live in the catalog; an
+  out-of-balance 429 is not retried; empty content with `finish_reason: length`
+  retries once with a larger budget.
 
 ## T9 — naluri eval (implemented)
 
@@ -369,7 +375,7 @@ when wrong, uncalibrated count, latency, tokens, estimated cost. Score cases map
 the backend's legend numbering (0- or 1-based) onto the 0-based expectation.
 Spend cap `--eval-budget` (default $1) on *estimated* cost with assumed,
 conservative prices. Offline tests cover the case file's validity and the
-scoring; the live run itself has not been executed yet.
+scoring. Live runs: see the findings below.
 
 **Caveats:** the 40 cases are synthetic and drafted by the assistant — at this size
 a difference under ~15 points between backends is noise; replace or extend them

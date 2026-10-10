@@ -9,3 +9,7 @@ build/.simple.h.conf
 
 # eval run output
 Evals/results/
+
+# editor swap files (may hold config secrets)
+*.swp
+*.swo
