@@ -65,6 +65,10 @@ public struct ProviderProfile: Sendable {
     /// Cheap model used when this provider backs naluri (ChatNaluri); nil
     /// falls back to defaultModel. Override per run with HARNESS_NALURI_MODEL.
     public var naluriModel: String?
+    /// Output-token cap for a naluri answer. nil = 4 (one answer token). Models
+    /// that cannot switch thinking off (glm-5.3-flash) spend tokens reasoning
+    /// before the answer, so they need headroom or the content comes back empty.
+    public var naluriMaxTokens: Int?
     /// Key-acquisition policy — see KeyResolution.
     public var keyResolution: KeyResolution
     /// Token-limit field quirk (see TokenLimitField).
@@ -81,6 +85,7 @@ public struct ProviderProfile: Sendable {
         envKeys: [String],
         defaultModel: String,
         naluriModel: String? = nil,
+        naluriMaxTokens: Int? = nil,
         keyResolution: KeyResolution = .envOnly,
         tokenLimitField: TokenLimitField = .maxTokens,
         sendsStreamOptions: Bool = false
@@ -90,6 +95,7 @@ public struct ProviderProfile: Sendable {
         self.envKeys = envKeys
         self.defaultModel = defaultModel
         self.naluriModel = naluriModel
+        self.naluriMaxTokens = naluriMaxTokens
         self.keyResolution = keyResolution
         self.tokenLimitField = tokenLimitField
         self.sendsStreamOptions = sendsStreamOptions
@@ -119,6 +125,7 @@ public extension Config {
             envKeys: ["ZAI_API_KEY", "Z_AI_API_KEY", "ZHIPU_API_KEY"],
             defaultModel: "glm-4.6",
             naluriModel: "glm-5.3-flash",
+            naluriMaxTokens: 1024,
             keyResolution: .envThenBorrow(piAuthEntry: "zai")
         ),
         // GLM Coding Plan (https://docs.z.ai/devpack/quick-start): the plan
@@ -132,6 +139,7 @@ public extension Config {
             envKeys: ["ZAI_CODING_API_KEY"],
             defaultModel: "glm-4.6",
             naluriModel: "glm-5.3-flash",
+            naluriMaxTokens: 1024,
             keyResolution: .envThenBorrow(piAuthEntry: "zai")
         ),
         // China-region coding plan (matches pi's zai-coding-cn provider).
@@ -141,6 +149,7 @@ public extension Config {
             envKeys: ["ZAI_CODING_CN_API_KEY"],
             defaultModel: "glm-5.3",
             naluriModel: "glm-5.3-flash",
+            naluriMaxTokens: 1024,
             keyResolution: .envThenBorrow(piAuthEntry: "zai-coding-cn")
         ),
         // DeepSeek: OpenAI-compatible at the root (the client appends

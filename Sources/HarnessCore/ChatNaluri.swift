@@ -65,6 +65,12 @@ struct ChatNaluri: NaluriBackend {
         return (lines.joined(separator: "\n"), candidates)
     }
 
+    /// True when a response ran out of tokens before producing any visible
+    /// answer — a thinking model spent the whole budget reasoning.
+    static func needsMoreTokens(content: String, finishReason: String?) -> Bool {
+        content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && finishReason == "length"
+    }
+
     /// Probability per candidate from top_logprobs, normalised over the
     /// candidates only. Tokens match after trimming whitespace and lowercasing
     /// (" Yes", "yes" and "YES" are the same answer). nil when no candidate
@@ -136,51 +142,65 @@ struct ChatNaluri: NaluriBackend {
 
     private func ask(_ question: NaluriQuestion, state: String) async throws -> (String, JSONValue, Int, Int) {
         let (text, candidates) = try Self.prompt(for: question, state: state)
-        var body: [String: JSONValue] = [
-            "model": .string(model),
-            "messages": .array([
-                .object(["role": .string("system"), "content": .string(
-                    "You are a fast classifier. Reply with the single answer token only — no explanation.")]),
-                .object(["role": .string("user"), "content": .string(text)]),
-            ]),
-            profile.tokenLimitField.rawValue: .number(4),
-            "temperature": .number(0),
-            "logprobs": .bool(true),
-            "top_logprobs": .number(20),
-            // Reasoning would burn the token budget before the answer token.
-            "thinking": .object(["type": .string("disabled")]),
-        ]
-        var root = try await post(body)
-        if root == nil {  // 400: this server rejects `thinking` — retry without it
-            body["thinking"] = nil
-            root = try await post(body)
-        }
-        guard let response = root?.objectValue,
-              let choice = response["choices"]?.arrayValue?.first?.objectValue else {
-            throw LLMError(status: 0, body: "no choices in naluri response for '\(question.id)'")
-        }
-        let usage = response["usage"]?.objectValue
-        let input = usage?["prompt_tokens"]?.intValue ?? 0
-        let output = usage?["completion_tokens"]?.intValue ?? 0
+        var maxTokens = profile.naluriMaxTokens ?? 4
+        var inputTotal = 0
+        var outputTotal = 0
+        // One retry with a much larger budget if a thinking model ran out of
+        // tokens before answering (empty content, finish_reason "length").
+        for attempt in 0..<2 {
+            var body: [String: JSONValue] = [
+                "model": .string(model),
+                "messages": .array([
+                    .object(["role": .string("system"), "content": .string(
+                        "You are a fast classifier. Reply with the single answer token only — no explanation.")]),
+                    .object(["role": .string("user"), "content": .string(text)]),
+                ]),
+                profile.tokenLimitField.rawValue: .number(Double(maxTokens)),
+                "temperature": .number(0),
+                "logprobs": .bool(true),
+                "top_logprobs": .number(20),
+                // Reasoning would burn the token budget before the answer token.
+                "thinking": .object(["type": .string("disabled")]),
+            ]
+            var root = try await post(body)
+            if root == nil {  // 400: this server rejects `thinking` — retry without it
+                body["thinking"] = nil
+                root = try await post(body)
+            }
+            guard let response = root?.objectValue,
+                  let choice = response["choices"]?.arrayValue?.first?.objectValue else {
+                throw LLMError(status: 0, body: "no choices in naluri response for '\(question.id)'")
+            }
+            let usage = response["usage"]?.objectValue
+            inputTotal += usage?["prompt_tokens"]?.intValue ?? 0
+            outputTotal += usage?["completion_tokens"]?.intValue ?? 0
 
-        let first = choice["logprobs"]?.objectValue?["content"]?.arrayValue?.first?.objectValue
-        let top = (first?["top_logprobs"]?.arrayValue ?? []).compactMap { item -> (String, Double)? in
-            guard let token = item.objectValue?["token"]?.stringValue,
-                  let logprob = item.objectValue?["logprob"]?.doubleValue else { return nil }
-            return (token, logprob)
+            let first = choice["logprobs"]?.objectValue?["content"]?.arrayValue?.first?.objectValue
+            let top = (first?["top_logprobs"]?.arrayValue ?? []).compactMap { item -> (String, Double)? in
+                guard let token = item.objectValue?["token"]?.stringValue,
+                      let logprob = item.objectValue?["logprob"]?.doubleValue else { return nil }
+                return (token, logprob)
+            }
+            if let probabilities = Self.distribution(top: top, candidates: candidates) {
+                return (question.id, Self.answer(for: question, probabilities: probabilities, calibrated: true),
+                        inputTotal, outputTotal)
+            }
+            // No usable logprobs: fall back to the generated token, one-hot.
+            let content = choice["message"]?.objectValue?["content"]?.stringValue ?? ""
+            if attempt == 0, Self.needsMoreTokens(content: content, finishReason: choice["finish_reason"]?.stringValue) {
+                maxTokens = min(max(maxTokens, 4) * 16, 4096)
+                continue
+            }
+            let token = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard let index = candidates.firstIndex(where: { token.hasPrefix($0) }) else {
+                throw LLMError(status: 0, body: "naluri answer for '\(question.id)' was not one of \(candidates): '\(content.prefix(40))'")
+            }
+            var probabilities = [Double](repeating: 0, count: candidates.count)
+            probabilities[index] = 1
+            return (question.id, Self.answer(for: question, probabilities: probabilities, calibrated: false),
+                    inputTotal, outputTotal)
         }
-        if let probabilities = Self.distribution(top: top, candidates: candidates) {
-            return (question.id, Self.answer(for: question, probabilities: probabilities, calibrated: true), input, output)
-        }
-        // No usable logprobs: fall back to the generated token, one-hot.
-        let content = choice["message"]?.objectValue?["content"]?.stringValue ?? ""
-        let token = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let index = candidates.firstIndex(where: { token.hasPrefix($0) }) else {
-            throw LLMError(status: 0, body: "naluri answer for '\(question.id)' was not one of \(candidates): '\(content.prefix(40))'")
-        }
-        var probabilities = [Double](repeating: 0, count: candidates.count)
-        probabilities[index] = 1
-        return (question.id, Self.answer(for: question, probabilities: probabilities, calibrated: false), input, output)
+        throw LLMError(status: 0, body: "naluri retry exhausted for '\(question.id)'")
     }
 
     /// POST one completion. Returns nil on HTTP 400 so the caller can retry

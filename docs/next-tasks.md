@@ -379,3 +379,12 @@ tuning per backend from these results.
 **Next (not built):** the agent eval — a subprocess runner (`harness --once` per
 case in a temp dir, check by command) needs one core change: persist token usage
 (the loop currently only prints it, and sub-agent usage is dropped).
+
+**Eval findings (first live runs, 40 cases):** Jev and deepseek-flash 40/40, glm-5.3-flash
+38/39 graded. The set is too easy to rank accuracy; calibration is what separates the
+backends — Jev gives graded probabilities (20/40 below 0.99, min 0.64), deepseek-flash
+is saturated (all ≥ 0.99), z.ai has no logprobs at all (picks only, flagged
+uncalibrated). Gate stays on Jev. glm-5.3-flash cannot disable thinking, so a 4-token
+cap returned empty content on one case; fixed with `ProviderProfile.naluriMaxTokens`
+(1024 for the GLM profiles) plus a one-shot 16× retry when content is empty and
+finish_reason is `length`.

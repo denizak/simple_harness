@@ -713,3 +713,22 @@ struct NaluriEvalTests {
         #expect(abs(cost - 0.30) < 1e-9)
     }
 }
+
+@Suite("naluri thinking-model headroom")
+struct NaluriHeadroomTests {
+    @Test("empty content + finish=length asks for a bigger budget; real answers do not")
+    func truncation() {
+        #expect(ChatNaluri.needsMoreTokens(content: "", finishReason: "length"))
+        #expect(ChatNaluri.needsMoreTokens(content: "  \n", finishReason: "length"))
+        #expect(!ChatNaluri.needsMoreTokens(content: "yes", finishReason: "length"))
+        #expect(!ChatNaluri.needsMoreTokens(content: "", finishReason: "stop"))
+    }
+
+    @Test("thinking-only GLM profiles carry token headroom; others default to one token")
+    func catalog() {
+        for name in ["zai", "zai-coding", "zai-coding-cn"] {
+            #expect((Config.catalog[name]?.naluriMaxTokens ?? 0) >= 512, "\(name)")
+        }
+        #expect(Config.catalog["deepseek"]?.naluriMaxTokens == nil)
+    }
+}
