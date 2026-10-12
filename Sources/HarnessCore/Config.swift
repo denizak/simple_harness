@@ -82,6 +82,13 @@ public struct Config: Sendable {
     /// Paths are relative to the working directory; missing files warn and
     /// are skipped. nil = none configured.
     public var attachedFiles: [String]? = nil
+    /// Tool aliasing (config-file key "toolAliases"): tool name → shell
+    /// command template. When the model calls an aliased tool, the template
+    /// runs instead of the built-in, with {placeholders} replaced by the
+    /// call's (shell-quoted) arguments — e.g.
+    /// "grep": "rg --max-count {max_matches} -e {pattern} {path}".
+    /// nil = every tool runs its built-in implementation.
+    public var toolAliases: [String: String]? = nil
 
 
     /// Explicit init mirroring the memberwise one with defaults — cross-module
@@ -106,7 +113,8 @@ public struct Config: Sendable {
         approvalPolicy: ApprovalPolicy = .never,
         tokenLimitKey: String = "max_tokens",
         streamOptions: Bool = false,
-        attachedFiles: [String]? = nil
+        attachedFiles: [String]? = nil,
+        toolAliases: [String: String]? = nil
     ) {
         self.provider = provider
         self.baseURL = baseURL
@@ -128,6 +136,7 @@ public struct Config: Sendable {
         self.tokenLimitKey = tokenLimitKey
         self.streamOptions = streamOptions
         self.attachedFiles = attachedFiles
+        self.toolAliases = toolAliases
     }
 
     public static func resolve(arguments: [String]) -> Config {
@@ -378,6 +387,9 @@ public struct Config: Sendable {
         }
         if let list = entries["attachedFiles"]?.arrayValue {
             config.attachedFiles = list.compactMap { $0.stringValue }
+        }
+        if let map = entries["toolAliases"]?.objectValue {
+            config.toolAliases = map.compactMapValues { $0.stringValue }
         }
     }
 }

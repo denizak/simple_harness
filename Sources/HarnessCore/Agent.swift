@@ -266,14 +266,24 @@ public struct Agent {
 
         let output: String
         do {
-            output = try await tool.run(arguments, ToolContext(
-                config: config,
-                model: model,
-                cwd: FileManager.default.currentDirectoryPath,
-                depth: depth,
-                approvalHook: approvalHook,
-                approvalState: approvalState
-            ))
+            // Config toolAliases: a mapped tool runs the shell template
+            // instead of its built-in (same schema as far as the model is
+            // concerned). Checked AFTER the approval gate, so aliasing can
+            // never turn a gated call into an ungated one.
+            if let template = config.toolAliases?[tool.name], !template.isEmpty {
+                output = await Tools.ToolAlias.run(
+                    template: template, arguments: arguments,
+                    cwd: FileManager.default.currentDirectoryPath)
+            } else {
+                output = try await tool.run(arguments, ToolContext(
+                    config: config,
+                    model: model,
+                    cwd: FileManager.default.currentDirectoryPath,
+                    depth: depth,
+                    approvalHook: approvalHook,
+                    approvalState: approvalState
+                ))
+            }
         } catch {
             output = "error: \(error.localizedDescription)"
         }

@@ -128,6 +128,11 @@ The key `attachedFiles` lists files whose contents are appended to the system
 prompt on every fresh conversation, so standing instructions are in the model's
 context from the first call: `"attachedFiles": ["AGENTS.md"]` (paths are
 relative to the working directory; a missing file warns and is skipped).
+The key `toolAliases` swaps a tool's *execution* for a shell command template
+while the model keeps calling the same tool: `"toolAliases": {"grep": "rg --max-count {max_matches} -e {pattern} {path}"}`
+— `{placeholders}` are replaced with the call's shell-quoted arguments.
+Aliasing sits behind the approval gate, so `--approval all` still gates the
+call.
 If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
 `/models` lists what the current provider offers. Typing `@` in the prompt

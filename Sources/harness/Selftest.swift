@@ -30,6 +30,7 @@ enum SelfTest {
         failures += await loadPrecedenceChecks()
         failures += await approvalGateChecks()
         failures += attachedFilesChecks()
+        failures += await toolAliasChecks()
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
@@ -620,6 +621,49 @@ enum SelfTest {
         check("missing attached file skipped, present one kept",
               attachedFilesPrompt(for: withMissing).contains("always answer in haiku")
                   && !attachedFilesPrompt(for: withMissing).contains("MISSING.md"), "")
+        return failures
+    }
+
+    // ---- toolAliases: shell template replaces a tool's execution -----------
+    private static func toolAliasChecks() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        // Config parsing: the key lands on Config as a name→template map.
+        let resolved = Config.resolve(
+            arguments: [], env: [:], pi: PIConfigSnapshot(),
+            file: ["toolAliases": .object(["grep": .string("rg -e {pattern} {path}")])])
+        check("toolAliases parsed from config file",
+              resolved.toolAliases == ["grep": "rg -e {pattern} {path}"],
+              "\(String(describing: resolved.toolAliases))")
+        check("toolAliases absent by default",
+              Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot(), file: [:]).toolAliases == nil, "")
+
+        // Substitution: shell-quote everything the model supplies, so a
+        // hostile pattern can't break out of its placeholder.
+        let args: [String: JSONValue] = [
+            "pattern": .string("'; rm -rf /"),
+            "path": .string("src"),
+            "ignore_case": .bool(true),
+            "max_matches": .number(50),
+        ]
+        let command = Tools.ToolAlias.command(template: "rg -i {ignore_case} --max-count {max_matches} -e {pattern} {path}", arguments: args)
+        check("aliases substitute + shell-quote arguments",
+              command.hasPrefix("rg -i true --max-count 50 -e ")
+                  && command.contains("'\\''; rm -rf /'") && command.hasSuffix(" 'src'"),
+              command)
+        check("placeholders without arguments stay for the tool's own defaults",
+              Tools.ToolAlias.command(template: "rg {pattern} {missing}",
+                                      arguments: ["pattern": .string("x")]) == "rg 'x' {missing}", "")
+        check("quoting helper escapes single quotes",
+              Tools.ToolAlias.shellQuoted("it's") == "'it'\\''s'", "")
+
+        // Live run through the real ShellRunner with an rg-shaped alias.
+        let output = await Tools.ToolAlias.run(
+            template: "printf 'aliased:%s' {pattern}",
+            arguments: ["pattern": .string("canary")], cwd: FileManager.default.currentDirectoryPath)
+        check("aliased template runs and returns output", output.contains("aliased:canary"), output)
         return failures
     }
 }

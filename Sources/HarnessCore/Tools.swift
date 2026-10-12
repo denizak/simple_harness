@@ -80,6 +80,52 @@ public enum Tools {
     }
 
     // -----------------------------------------------------------------------
+    // Tool aliasing (Config.toolAliases). The model keeps calling the SAME
+    // tool (same schema, same description) — only the execution is swapped
+    // for a shell command template with {arg} placeholders. Every value is
+    // shell-quoted, so a model-controlled pattern can't break out of its
+    // placeholder.
+    // -----------------------------------------------------------------------
+    public enum ToolAlias {
+        /// POSIX single-quote a value (' → '\'' — the classic end-quote,
+        /// escaped-quote, reopen idiom).
+        public static func shellQuoted(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+
+        /// Substitute {placeholder} for each tool argument (strings verbatim,
+        /// booleans true/false, numbers as integers). Placeholders with no
+        /// matching argument are left as-is so the aliased command's own
+        /// defaults apply; unknown arguments are ignored.
+        public static func command(template: String, arguments: [String: JSONValue]) -> String {
+            var command = template
+            for (key, value) in arguments.sorted(by: { $0.key < $1.key }) {
+                let replacement: String?
+                switch value {
+                case .string(let string): replacement = shellQuoted(string)
+                case .bool(let bool): replacement = bool ? "true" : "false"
+                case .number(let number): replacement = String(Int(number))
+                default: replacement = nil
+                }
+                if let replacement {
+                    command = command.replacingOccurrences(of: "{\(key)}", with: replacement)
+                }
+            }
+            return command
+        }
+
+        /// Run an aliased tool: template → command → bounded shell run in the
+        /// harness cwd. Same truncation and text-not-throw contract as the
+        /// built-in tools (Agent.execute caps the result anyway).
+        public static func run(
+            template: String, arguments: [String: JSONValue], cwd: String, timeout: Double = 120
+        ) async -> String {
+            await Tools.runShell(command: command(template: template, arguments: arguments),
+                                 cwd: cwd, timeout: timeout)
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // grep — native regex search (no subshell needed).
     //
     // Why not just `bash grep`? A dedicated tool is ONE round-trip (no
