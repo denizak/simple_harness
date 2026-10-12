@@ -77,6 +77,11 @@ public struct Config: Sendable {
     /// send stream_options.include_usage while streaming? (Ollama-family
     /// servers accept it; some gateways validate strictly and reject it.)
     public var streamOptions: Bool = false
+    /// Files whose contents are attached to the system prompt on every fresh
+    /// conversation (config-file key "attachedFiles", e.g. AGENTS.md).
+    /// Paths are relative to the working directory; missing files warn and
+    /// are skipped. nil = none configured.
+    public var attachedFiles: [String]? = nil
 
 
     /// Explicit init mirroring the memberwise one with defaults — cross-module
@@ -100,7 +105,8 @@ public struct Config: Sendable {
         gateThreshold: Double = 0.5,
         approvalPolicy: ApprovalPolicy = .never,
         tokenLimitKey: String = "max_tokens",
-        streamOptions: Bool = false
+        streamOptions: Bool = false,
+        attachedFiles: [String]? = nil
     ) {
         self.provider = provider
         self.baseURL = baseURL
@@ -121,6 +127,7 @@ public struct Config: Sendable {
         self.approvalPolicy = approvalPolicy
         self.tokenLimitKey = tokenLimitKey
         self.streamOptions = streamOptions
+        self.attachedFiles = attachedFiles
     }
 
     public static func resolve(arguments: [String]) -> Config {
@@ -368,6 +375,9 @@ public struct Config: Sendable {
         }
         if let value = string("approvalPolicy"), let policy = ApprovalPolicy.parse(value) {
             config.approvalPolicy = policy
+        }
+        if let list = entries["attachedFiles"]?.arrayValue {
+            config.attachedFiles = list.compactMap { $0.stringValue }
         }
     }
 }

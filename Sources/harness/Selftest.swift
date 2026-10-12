@@ -29,6 +29,7 @@ enum SelfTest {
         failures += anthropicChecks()
         failures += await loadPrecedenceChecks()
         failures += await approvalGateChecks()
+        failures += attachedFilesChecks()
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
@@ -578,6 +579,47 @@ enum SelfTest {
             check("approval gate checks ran", false, "\(error)")
         }
         try? FileManager.default.removeItem(atPath: dir)
+        return failures
+    }
+
+    // ---- attachedFiles: config-file listed files join the system prompt ----
+    private static func attachedFilesChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        // Config parsing: the key lands on Config as a string list.
+        let resolved = Config.resolve(
+            arguments: [], env: [:], pi: PIConfigSnapshot(),
+            file: ["attachedFiles": .array([.string("AGENTS.md"), .string("CLAUDE.md")])])
+        check("attachedFiles parsed from config file",
+              resolved.attachedFiles == ["AGENTS.md", "CLAUDE.md"],
+              "\(String(describing: resolved.attachedFiles))")
+        check("attachedFiles absent by default",
+              Config.resolve(arguments: [], env: [:], pi: PIConfigSnapshot(), file: [:]).attachedFiles == nil, "")
+
+        // Prompt injection: a real temp file's contents must appear verbatim;
+        // a missing file warns and is skipped without killing the prompt.
+        let dir = NSTemporaryDirectory() + "/selftest-attached-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let agents = dir + "/AGENTS.md"
+        try? "always answer in haiku".write(toFile: agents, atomically: true, encoding: .utf8)
+        let base = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none", model: "stub")
+        let withFile = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none", model: "stub",
+                              attachedFiles: ["AGENTS.md"])
+        // chdir is process-global, so run the cwd-relative check last and restore.
+        let original = FileManager.default.currentDirectoryPath
+        defer { FileManager.default.changeCurrentDirectoryPath(original) }
+        FileManager.default.changeCurrentDirectoryPath(dir)
+        check("attached file contents reach the system prompt",
+              attachedFilesPrompt(for: withFile).contains("always answer in haiku")
+                  && attachedFilesPrompt(for: withFile).contains("# Attached file: AGENTS.md"), "")
+        check("no attachments → empty suffix", attachedFilesPrompt(for: base) == "", "")
+        let withMissing = Config(provider: "stub", baseURL: "stub://stub", apiKey: "none", model: "stub",
+                                 attachedFiles: ["AGENTS.md", "MISSING.md"])
+        check("missing attached file skipped, present one kept",
+              attachedFilesPrompt(for: withMissing).contains("always answer in haiku")
+                  && !attachedFilesPrompt(for: withMissing).contains("MISSING.md"), "")
         return failures
     }
 }

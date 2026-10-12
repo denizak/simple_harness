@@ -124,6 +124,10 @@ A JSON config file (`--config PATH`, `HARNESS_CONFIG`, or by default
 `apiKey`, `model`, `maxTurns`, `streaming`, `reasoningEffort`, `gate`,
 `gateThreshold`, `typesafeApiKey`, `naluri`, `naluriModel`, `approval`, … as a top-level JSON object. Precedence:
 flags > environment > config file > defaults.
+The key `attachedFiles` lists files whose contents are appended to the system
+prompt on every fresh conversation, so standing instructions are in the model's
+context from the first call: `"attachedFiles": ["AGENTS.md"]` (paths are
+relative to the working directory; a missing file warns and is skipped).
 If pi is installed, its `~/.pi/agent/models.json` provider is borrowed as a
 fallback — same trick pi itself uses for provider config. Inside the REPL,
 `/models` lists what the current provider offers. Typing `@` in the prompt

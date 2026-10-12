@@ -21,7 +21,26 @@ func systemPrompt(for config: Config) -> String {
     Prefer one focused tool call per turn. Tool failures are text — read them and adapt.
     When the task is done, stop and reply in plain text with a brief summary.
     Current directory: \(cwd)
-    """
+    """ + attachedFilesPrompt(for: config)
+}
+
+/// Contents of config.attachedFiles, appended to the system prompt so the
+/// model sees them from the very first call (AGENTS.md-style instructions).
+/// A missing or unreadable file warns and is skipped — attachment is a
+/// convenience, not a dependency, mirroring the config-file policy.
+func attachedFilesPrompt(for config: Config) -> String {
+    guard let paths = config.attachedFiles, !paths.isEmpty else { return "" }
+    var sections = ""
+    for path in paths {
+        let resolved = path.hasPrefix("/") ? path
+            : FileManager.default.currentDirectoryPath + "/" + path
+        if let content = try? String(contentsOfFile: resolved, encoding: .utf8) {
+            sections += "\n\n# Attached file: \(path)\n\n\(content.trimmingCharacters(in: .whitespacesAndNewlines))"
+        } else {
+            print(AgentUI.warn("attached file not found: \(path) — skipping"))
+        }
+    }
+    return sections
 }
 
 func banner(_ config: Config) {
@@ -90,6 +109,8 @@ struct HarnessMain {
                   --api-key KEY     API key override
                   --config PATH     JSON config file (default ./.simple.h.conf;
                                     env HARNESS_CONFIG; env vars and flags still win)
+                                    key "attachedFiles": [paths] whose contents
+                                    join the system prompt (e.g. AGENTS.md)
                   --gate            enable the pre-model gate (naluri; needs TYPESAFE_API_KEY)
                   --no-gate         disable it (overrides file/env)
                   --gate-threshold P   minimum proceed probability (0..<1, default 0.5)
