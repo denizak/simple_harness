@@ -1,7 +1,7 @@
 # T20 — Resume the last session at startup (`--resume`)
 
-**Status:** backlog
-**Commit:**
+**Status:** done
+**Commit:** 8c5fb77
 
 ## Why
 Sessions autosave to `.harness/session.json` after every task (success and
