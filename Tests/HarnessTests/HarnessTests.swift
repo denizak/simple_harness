@@ -458,8 +458,30 @@ struct LoadPrecedenceTests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stub-model loop tests — the agent loop with a scripted ChatModel and REAL
+@Suite("--resume parsing")
+struct SessionResumeTests {
+    @Test("no flag → .none, even with other flags around")
+    func none() {
+        #expect(SessionResume.parse([]) == .none)
+        #expect(SessionResume.parse(["--once", "task"]) == .none)
+        #expect(SessionResume.parse(["--model", "m", "--resume-x", "p"]) == .none)
+    }
+
+    @Test("bare flag → .last; a following flag is NOT swallowed as a path")
+    func last() {
+        #expect(SessionResume.parse(["--resume"]) == .last)
+        #expect(SessionResume.parse(["--resume", "--once", "task"]) == .last)
+        #expect(SessionResume.parse(["--resume", "--model", "m"]) == .last)
+        #expect(SessionResume.parse(["--resume", "--resume"]) == .last)
+    }
+
+    @Test("following non-flag token becomes the path")
+    func path() {
+        #expect(SessionResume.parse(["--resume", "/tmp/s.json"]) == .path("/tmp/s.json"))
+        #expect(SessionResume.parse(["--once", "t", "--resume", "s.json", "--no-streaming"]) == .path("s.json"))
+    }
+}
+
 // tools in a temp directory. Offline, deterministic: proves tool_calls parse,
 // tools execute, results feed back, and the loop terminates.
 // ---------------------------------------------------------------------------

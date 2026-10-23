@@ -62,6 +62,8 @@ swift build
 ./.build/debug/harness                 # interactive REPL
 ./.build/debug/harness --selftest      # verify the tool layer (no API call)
 ./.build/debug/harness --once "list the files in this directory"   # one-shot
+./.build/debug/harness --resume            # continue .harness/session.json
+./.build/debug/harness --resume other.json --once "next task"
 ```
 
 Slash commands inside the REPL: `/help /reset /model /tools /save /load /retry /exit`.
@@ -316,7 +318,9 @@ be reached from tests only via `@testable import`.
    rewriting a JSON blob (pi's `session-format.md`); the log is fsync'd per
    line and compaction journals a `replace` event, so a crash loses at most
    the in-flight turn. `/save` + `/load` still own resuming (model/endpoint
-   state is not part of a transcript).
+   state is not part of a transcript) — as does `--resume [PATH]` at
+   startup, which runs the same `/load` precedence (launch config wins on
+   endpoint mismatch) before the first task.
 4. **A second client** (done — `AnthropicClient` in
    `Sources/HarnessCore/AnthropicClient.swift`; `anthropic` provider in the catalog,
    `ANTHROPIC_API_KEY`, streaming + `/models`) — the native Messages API client; see

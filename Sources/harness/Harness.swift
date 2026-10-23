@@ -111,6 +111,10 @@ struct HarnessMain {
                                     env HARNESS_CONFIG; env vars and flags still win)
                                     key "attachedFiles": [paths] whose contents
                                     join the system prompt (e.g. AGENTS.md)
+                   --resume [PATH]   restore a saved session before the first
+                                     task (default .harness/session.json when
+                                     PATH is omitted; a following token counts
+                                     as PATH only if it isn't another flag)
                   --gate            enable the pre-model gate (naluri; needs TYPESAFE_API_KEY)
                   --no-gate         disable it (overrides file/env)
                   --gate-threshold P   minimum proceed probability (0..<1, default 0.5)
@@ -119,8 +123,8 @@ struct HarnessMain {
                                       HARNESS_APPROVAL; REPL-only prompts)
                   --no-streaming    disable SSE streaming
                   --session-log PATH  append a JSONL transcript line-by-line
-                                      (crash-safe; off by default — /save
-                                      remains the way to resume a session)
+                                      (crash-safe; pair with --resume to
+                                      pick a run back up after a crash)
                   --no-session-log  disable it (overrides file/env)
                   --max-turns N     turn cap per task (default 25)
                   --typesafe-key KEY   TypeSafe API key override
@@ -142,7 +146,20 @@ struct HarnessMain {
         }
 
         let config = Config.resolve(arguments: arguments)
-        banner(config)
+        var agent = Agent(config: config, model: makeChatModel(for: config))
+
+        // Apply --resume BEFORE the banner so it shows the model actually in
+        // effect (a restored session may switch it; endpoint mismatch keeps
+        // the launch model). Mirrors /load: load + restoreModel precedence.
+        var messages: [Message]
+        do {
+            messages = try resumeSession(SessionResume.parse(arguments), agent: &agent)
+        } catch {
+            print(AgentUI.errorText("error: \(error)"))
+            exit(1)
+        }
+
+        banner(agent.config)
 
         // ---- Approval-gate notice + hook installation -----------------------
         // The notice prints for ANY policy, so a silent environment override
@@ -155,9 +172,6 @@ struct HarnessMain {
                 "[approval] policy '\(config.approvalPolicy.rawValue)' active — " +
                 "gated tool calls ask before running (fail-closed without a prompt)"))
         }
-
-        var messages: [Message] = [.system(systemPrompt(for: config))]
-        var agent = Agent(config: config, model: makeChatModel(for: config))
 
         var retryAvailable = false
 
@@ -229,6 +243,27 @@ struct HarnessMain {
             return false
         }
         return taskSucceeded
+    }
+
+    /// Apply --resume before the REPL/`--once` starts: load the requested
+    /// session and restore the conversation — the same code path as `/load`
+    /// (one precedence policy, not two: launch config wins on endpoint
+    /// mismatch). `.last` means the default session file. Errors surface as a
+    /// thrown Error so --once fails loudly instead of running taskless history.
+    static func resumeSession(_ resume: SessionResume, agent: inout Agent) throws -> [Message] {
+        guard resume != .none else { return [.system(systemPrompt(for: agent.config))] }
+        let url: URL?
+        if case .path(let p) = resume { url = URL(fileURLWithPath: p) } else { url = nil }
+        let session = try Session.load(from: url)
+        if let restored = session.restoreModel(activeBaseURL: agent.config.baseURL) {
+            agent.selectModel(restored) { makeChatModel(for: $0) }
+            print(AgentUI.dim("resumed \(session.messages.count) messages (\(restored))"))
+        } else {
+            print(AgentUI.warn(
+                "session was created on a different endpoint — keeping current model " +
+                "\(agent.config.model); only the conversation was restored"))
+        }
+        return session.messages
     }
 
     /// Continue a failed task from its recorded transcript; never re-append

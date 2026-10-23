@@ -73,3 +73,23 @@ extension Session {
         return sessionURL == activeBaseURL ? model : nil
     }
 }
+
+/// What `--resume` asked for at startup.
+///
+/// `--resume` with no value means the default session file; `--resume PATH`
+/// means that file. A following token counts as a path only when it isn't
+/// another flag — so `--resume --once "task"` never swallows `--once`.
+public enum SessionResume: Equatable, Sendable {
+    case none
+    case last
+    case path(String)
+
+    public static func parse(_ arguments: [String]) -> SessionResume {
+        guard let index = arguments.firstIndex(of: "--resume") else { return .none }
+        let next = arguments.index(after: index)
+        if next < arguments.endIndex, !arguments[next].hasPrefix("--") {
+            return .path(arguments[next])
+        }
+        return .last
+    }
+}
