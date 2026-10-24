@@ -66,7 +66,7 @@ swift build
 ./.build/debug/harness --resume other.json --once "next task"
 ```
 
-Slash commands inside the REPL: `/help /reset /model /tools /save /load /retry /exit`.
+Slash commands inside the REPL: `/help /reset /usage /model /tools /save /load /retry /exit`.
 `/retry` is available after a model/API or turn-cap failure and continues from
 the saved-in-memory transcript; it does not append a duplicate user prompt or
 re-execute tool calls that already have results. Failed transcripts are
@@ -120,7 +120,8 @@ export OLLAMA_API_KEY=...
 ```
 
 Environment overrides: `HARNESS_BASE_URL`, `HARNESS_API_KEY`, `HARNESS_MODEL`,
-`HARNESS_PROVIDER`, `HARNESS_COMPACT_BYTES`, `HARNESS_COMPACT_KEEP_TAIL`.
+`HARNESS_PROVIDER`, `HARNESS_COMPACT_BYTES`, `HARNESS_COMPACT_KEEP_TAIL`,
+`HARNESS_CONTEXT_WINDOW` (tokens; `0` = unknown, suppresses the /usage ratio).
 A JSON config file (`--config PATH`, `HARNESS_CONFIG`, or by default
 `.simple.h.conf` in the working directory) can hold the same values — `provider`, `baseURL`,
 `apiKey`, `model`, `maxTurns`, `streaming`, `reasoningEffort`, `gate`,

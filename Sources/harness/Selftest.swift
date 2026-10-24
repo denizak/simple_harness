@@ -31,6 +31,7 @@ enum SelfTest {
         failures += await approvalGateChecks()
         failures += attachedFilesChecks()
         failures += await toolAliasChecks()
+        failures += usageChecks()
         print(failures == 0 ? "selftest: all passed" : AgentUI.errorText("selftest: \(failures) failure(s)"))
         exit(failures == 0 ? 0 : 1)
     }
@@ -664,6 +665,52 @@ enum SelfTest {
             template: "printf 'aliased:%s' {pattern}",
             arguments: ["pattern": .string("canary")], cwd: FileManager.default.currentDirectoryPath)
         check("aliased template runs and returns output", output.contains("aliased:canary"), output)
+        return failures
+    }
+
+    private static func usageChecks() -> Int {
+        var failures = 0
+        func check(_ name: String, _ condition: Bool, _ detail: String = "") {
+            Self.check(name, condition, detail, failures: &failures)
+        }
+        // Window lookup precedence: per-model entry beats provider default;
+        // unknown model falls back to the default; nothing documented → nil.
+        let openai = Config.catalog["openai"]
+        check("per-model window documented for gpt-4o",
+              openai?.contextWindow(for: "gpt-4o") == 128_000,
+              "\(String(describing: openai?.contextWindow(for: "gpt-4o")))")
+        check("family default applies to unknown models",
+              Config.catalog["zai"]?.contextWindow(for: "glm-9.9") == 200_000, "")
+        check("no window documented → nil (ratio suppressed)",
+              Config.catalog["deepseek"]?.contextWindow(for: "anything") == nil, "")
+
+        // Env override: positive wins over the catalog, ≤0 means unknown.
+        var overrideEnv = ["HARNESS_PROVIDER": "zai", "HARNESS_CONTEXT_WINDOW": "123456"]
+        check("HARNESS_CONTEXT_WINDOW overrides the catalog",
+              Config.resolve(arguments: [], env: overrideEnv, pi: PIConfigSnapshot(),
+                             file: [:]).contextWindow == 123_456, "")
+        overrideEnv["HARNESS_CONTEXT_WINDOW"] = "0"
+        check("HARNESS_CONTEXT_WINDOW=0 suppresses the ratio",
+              Config.resolve(arguments: [], env: overrideEnv, pi: PIConfigSnapshot(),
+                             file: [:]).contextWindow == nil, "")
+
+        // Agent accounting via the recordUsage seam the run loop uses.
+        var agentConfig = Config.resolve(arguments: [], env: ["HARNESS_PROVIDER": "zai"],
+                                         pi: PIConfigSnapshot(), file: [:])
+        agentConfig.model = "glm-4.6"
+        var agent = Agent(config: agentConfig, model: OpenAICompatClient(config: agentConfig))
+        check("summary before any turn has no ratio",
+              agent.usageSummary() == "0 tokens so far", agent.usageSummary())
+        agent.recordUsage(promptTokens: 99_000, completionTokens: 1_000)
+        check("context reflects the last turn, not the sum",
+              agent.usageSummary() == "100000 tokens so far — context 100000/200000 (50%)",
+              agent.usageSummary())
+        agent.recordUsage(promptTokens: 170_000, completionTokens: 0)
+        check("≥81% of the window is flagged",
+              agent.usageSummary().hasSuffix("(85%) ⚠︎"), agent.usageSummary())
+        agent.resetUsage()
+        check("resetUsage clears the totals",
+              agent.usageSummary() == "0 tokens so far", agent.usageSummary())
         return failures
     }
 }

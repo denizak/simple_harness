@@ -60,6 +60,7 @@ func helpText() {
     /model [id]       show or switch the model (e.g. /model gpt-4o-mini)
     /models           list models offered by the current provider
     /tools            list available tools
+    /usage            token totals for this session, context vs. window
     /save [file]      save the session (default .harness/session.json)
     /load [file]      load a session
     /retry            continue the current task after an API or turn-cap failure
@@ -303,6 +304,7 @@ struct HarnessMain {
             exit(0)
         case "/reset":
             messages = [.system(systemPrompt(for: agent.config))]
+            agent.resetUsage()
             retryAvailable = false
             print(AgentUI.dim("conversation reset"))
         case "/model":
@@ -314,6 +316,8 @@ struct HarnessMain {
             }
         case "/tools":
             for tool in Tools.all { print(AgentUI.dim("  \(tool.name) — \(tool.description)")) }
+        case "/usage":
+            print(AgentUI.dim(agent.usageSummary()))
         case "/models":
             // Lists what the CURRENT provider offers (GET {baseURL}/models) —
             // with Ollama Cloud that's the whole cloud catalog.

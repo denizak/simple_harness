@@ -57,6 +57,44 @@ public struct Agent {
         self.depth = depth
     }
 
+    // ---- Usage accounting -------------------------------------------------
+    // Cumulative tokens billed across this agent's turns (sub-agents account
+    // separately, mirroring depth-scoped run state). `contextTokens` is the
+    // LAST turn's prompt+completion — chat APIs re-send the whole history, so
+    // it already is the current context size, and compaction shrinking the
+    // history is reflected on the next turn automatically.
+    public private(set) var totalPromptTokens = 0
+    public private(set) var totalCompletionTokens = 0
+    public private(set) var contextTokens = 0
+
+    /// Test seam: account one model turn without going through the run loop.
+    /// Mirrors exactly what the loop does with turn.usage.
+    public mutating func recordUsage(promptTokens: Int, completionTokens: Int) {
+        totalPromptTokens += promptTokens
+        totalCompletionTokens += completionTokens
+        contextTokens = promptTokens + completionTokens
+    }
+
+    /// Clear the running totals (used by the REPL's /reset — the conversation
+    /// starts over, so the accounting does too).
+    public mutating func resetUsage() {
+        totalPromptTokens = 0
+        totalCompletionTokens = 0
+        contextTokens = 0
+    }
+
+    /// One line for the REPL: totals plus "context/max" when the window is
+    /// known; 81%+ of the window flags the compaction threshold nearing.
+    public func usageSummary() -> String {
+        var line = "\(totalPromptTokens + totalCompletionTokens) tokens so far"
+        if let window = config.contextWindow, contextTokens > 0 {
+            let percent = window > 0 ? contextTokens * 100 / window : 0
+            let flag = percent >= 81 ? " ⚠︎" : ""
+            line += " — context \(contextTokens)/\(window) (\(percent)%)\(flag)"
+        }
+        return line
+    }
+
     // ---- Tool-approval gate (Approval.swift) ------------------------------
     // Ownership: the *policy* lives in Config; the *decider* is injected
     // here. A nil decider under a demanding policy (dangerous/all) must
@@ -171,8 +209,16 @@ public struct Agent {
 
             UsageLog.append(path: config.usageLog, depth: depth, usage: turn.usage, finish: turn.finishReason)
             if let usage = turn.usage {
+                totalPromptTokens += usage.promptTokens
+                totalCompletionTokens += usage.completionTokens
+                contextTokens = usage.promptTokens + usage.completionTokens
                 let tokens = usage.promptTokens + usage.completionTokens
-                let summary = "   [turn \(turnIndex): \(tokens) tokens, finish=\(turn.finishReason)]"
+                var summary = "   [turn \(turnIndex): \(tokens) tokens, finish=\(turn.finishReason)]"
+                if let window = config.contextWindow {
+                    let percent = window > 0 ? contextTokens * 100 / window : 0
+                    summary += " — ctx \(contextTokens)/\(window) (\(percent)%)" +
+                        (percent >= 81 ? " ⚠︎" : "")
+                }
                 print(AgentUI.dim(summary))
             }
 

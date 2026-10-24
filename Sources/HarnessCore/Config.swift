@@ -32,6 +32,10 @@ public struct Config: Sendable {
     /// Per-turn token usage as JSONL (UsageLog.swift); nil = off. Opt-in via
     /// HARNESS_USAGE_LOG; shared with sub-agents through subConfig.
     public var usageLog: String?
+    /// Model context window in tokens, for "used/max" displays. Derived from
+    /// the provider catalog at display time; HARNESS_CONTEXT_WINDOW overrides
+    /// (or 0 = suppress, for windows the catalog does not know).
+    public var contextWindow: Int?
     public var maxTokens: Int = 4096
     /// Hard cap on model turns per user task (loop safety belt).
     public var maxTurns: Int = 25
@@ -240,6 +244,11 @@ public struct Config: Sendable {
             config.streaming = false
         }
         if let value = env["HARNESS_USAGE_LOG"], !value.isEmpty { config.usageLog = value }
+        // 0 (or negative) = explicitly unknown: suppresses the ratio for
+        // models the catalog has no window for.
+        if let raw = env["HARNESS_CONTEXT_WINDOW"], let parsed = Int(raw) {
+            config.contextWindow = parsed > 0 ? parsed : nil
+        }
         if let value = env["HARNESS_REASONING"], !value.isEmpty {
             config.reasoningEffort = value
         }
@@ -313,6 +322,7 @@ public struct Config: Sendable {
         // Wire quirks travel with the profile — the client never string-matches.
         config.tokenLimitKey = profile.tokenLimitField.rawValue
         config.streamOptions = profile.sendsStreamOptions || config.baseURL.contains("11434")
+        config.contextWindow = profile.contextWindow(for: config.model)
         return config
     }
 

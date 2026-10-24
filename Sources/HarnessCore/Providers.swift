@@ -76,6 +76,21 @@ public struct ProviderProfile: Sendable {
     /// May the client send stream_options.include_usage while streaming?
     public var sendsStreamOptions: Bool
 
+    /// Known context windows by model id. Only models documented by the
+    /// provider are listed; anything else falls back to defaultContextWindow.
+    public var contextWindows: [String: Int]
+    /// Fallback window for models without an exact entry. nil = unknown —
+    /// the UI suppresses "x/max" displays rather than showing a guess.
+    public var defaultContextWindow: Int?
+
+    /// Context-window tokens for a model id: exact entry first, then the
+    /// provider default, else nil (unknown). Derived from the live
+    /// provider+model at display time, so /model switches and --resume
+    /// restores can never show a stale window.
+    public func contextWindow(for model: String) -> Int? {
+        contextWindows[model] ?? defaultContextWindow
+    }
+
     /// Explicit init with defaults so catalog entries only declare their
     /// differences (the synthesized memberwise init would demand every
     /// parameter — Swift doesn't apply property defaults to it).
@@ -88,7 +103,9 @@ public struct ProviderProfile: Sendable {
         naluriMaxTokens: Int? = nil,
         keyResolution: KeyResolution = .envOnly,
         tokenLimitField: TokenLimitField = .maxTokens,
-        sendsStreamOptions: Bool = false
+        sendsStreamOptions: Bool = false,
+        contextWindows: [String: Int] = [:],
+        defaultContextWindow: Int? = nil
     ) {
         self.name = name
         self.baseURL = baseURL
@@ -99,6 +116,8 @@ public struct ProviderProfile: Sendable {
         self.keyResolution = keyResolution
         self.tokenLimitField = tokenLimitField
         self.sendsStreamOptions = sendsStreamOptions
+        self.contextWindows = contextWindows
+        self.defaultContextWindow = defaultContextWindow
     }
 
     /// First env key present in the given environment.
@@ -117,7 +136,14 @@ public extension Config {
             baseURL: "https://api.openai.com/v1",
             envKeys: ["OPENAI_API_KEY"],
             defaultModel: "gpt-4o-mini",
-            tokenLimitField: .maxCompletionTokens
+            tokenLimitField: .maxCompletionTokens,
+            // Model windows per platform.openai.com/docs/models. Models not
+            // listed here have no known window — no ratio is shown.
+            contextWindows: [
+                "gpt-4o": 128_000, "gpt-4o-mini": 128_000,
+                "gpt-4.1": 1_047_576, "gpt-4.1-mini": 1_047_576, "gpt-4.1-nano": 1_047_576,
+                "o3": 200_000, "o4-mini": 200_000,
+            ]
         ),
         "zai": ProviderProfile(
             name: "zai",
@@ -126,7 +152,8 @@ public extension Config {
             defaultModel: "glm-4.6",
             naluriModel: "glm-5.3-flash",
             naluriMaxTokens: 1024,
-            keyResolution: .envThenBorrow(piAuthEntry: "zai")
+            keyResolution: .envThenBorrow(piAuthEntry: "zai"),
+            defaultContextWindow: 200_000  // GLM-4.x family
         ),
         // GLM Coding Plan (https://docs.z.ai/devpack/quick-start): the plan
         // has its OWN endpoints, separate from the standard platform API.
@@ -170,7 +197,8 @@ public extension Config {
             name: "anthropic",
             baseURL: "https://api.anthropic.com/v1",
             envKeys: ["ANTHROPIC_API_KEY"],
-            defaultModel: "claude-sonnet-4-5"
+            defaultModel: "claude-sonnet-4-5",
+            defaultContextWindow: 200_000  // claude-4/4.5 family
         ),
         // OpenRouter: multi-model router speaking the standard OpenAI
         // Chat Completions dialect (including SSE streaming). Model ids are
@@ -192,7 +220,8 @@ public extension Config {
             baseURL: "https://ollama.com/v1",
             envKeys: ["OLLAMA_API_KEY"],
             defaultModel: "kimi-k2.7-code",
-            sendsStreamOptions: true
+            sendsStreamOptions: true,
+            defaultContextWindow: 262_144  // Kimi K2
         ),
         // Local Ollama server. Its key is optional ("required but ignored"
         // per the OpenAI-compat docs), so no borrowing is needed.
